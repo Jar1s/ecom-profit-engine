@@ -10,6 +10,42 @@ import requests
 
 from config import Settings
 
+_SHOPIFY_403_HINT = (
+    " In Shopify Admin → Settings → Apps → your app: add Admin API scope "
+    "**read_orders** (and save), then **reinstall** the app on the store so the "
+    "new token includes that scope."
+)
+
+
+def _http_error_detail(response: requests.Response) -> str:
+    """Short message from JSON body; Shopify often returns {\"errors\": \"...\"}."""
+    text = (response.text or "").strip()
+    if not text:
+        return ""
+    try:
+        data = response.json()
+    except ValueError:
+        return text[:1200]
+    if not isinstance(data, dict):
+        return text[:1200]
+    err = data.get("errors")
+    if err is not None:
+        if isinstance(err, str):
+            return err
+        if isinstance(err, dict):
+            parts = [f"{k}: {v}" for k, v in err.items()]
+            return "; ".join(parts)[:1200]
+        if isinstance(err, list):
+            return str(err)[:1200]
+    err = data.get("error")
+    if isinstance(err, str):
+        return err
+    if isinstance(err, dict):
+        msg = err.get("message")
+        if msg:
+            return str(msg)
+    return text[:1200]
+
 
 def get_json(
     url: str,
@@ -69,7 +105,16 @@ def get_response(
                 _sleep_backoff(settings, attempt)
                 attempt += 1
                 continue
-            response.raise_for_status()
+            if response.status_code >= 400:
+                detail = _http_error_detail(response)
+                msg = f"HTTP {response.status_code}"
+                if detail:
+                    msg = f"{msg}: {detail}"
+                else:
+                    msg = f"{msg} for {response.url}"
+                if response.status_code == 403 and "myshopify.com" in (response.url or ""):
+                    msg = msg + _SHOPIFY_403_HINT
+                raise RuntimeError(msg) from None
             return response
         except requests.RequestException as exc:
             last_exc = exc

@@ -63,6 +63,8 @@ def run_pipeline(request: Request) -> JSONResponse:
         return JSONResponse(status_code=200 if code == 0 else 500, content=body)
     except Exception as exc:
         logger.exception("Pipeline failed")
+        # One-line summary for Vercel log search (full traceback is above)
+        logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
         return JSONResponse(
             status_code=500,
             content={"ok": False, "error": str(exc)},

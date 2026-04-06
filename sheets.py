@@ -59,6 +59,13 @@ def upload_dataframe(
     """Clear worksheet and write dataframe (batch by row chunks)."""
     client = _authorize(settings)
     sh = client.open(settings.google_sheet_name)
+    logger.info(
+        "Sheets target: file=%r spreadsheet_id=%s tab=%r data_rows=%s",
+        sh.title,
+        sh.id,
+        worksheet_title,
+        len(df.index),
+    )
     try:
         ws = sh.worksheet(worksheet_title)
     except gspread.exceptions.WorksheetNotFound:

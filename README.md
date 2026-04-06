@@ -34,7 +34,7 @@ cd ecom-profit-engine
 python pipeline.py
 ```
 
-(Do **not** add a root `main.py` — Vercel reserves that name as a Python web entrypoint and your `api/*.py` routes may not deploy as Serverless Functions.)
+(Do **not** add a root `main.py` — Vercel reserves that name. The HTTP entry for deploys is [`app.py`](app.py) (FastAPI); the pipeline CLI stays in [`pipeline.py`](pipeline.py).)
 
 Exit code `0` on success, `1` on configuration or fatal errors.
 

@@ -222,6 +222,16 @@ def sheet_values_with_summary(
         spend = float(df["Ad_Spend"].sum()) if "Ad_Spend" in df.columns else 0.0
         pur = float(df["Purchases"].sum()) if "Purchases" in df.columns else 0.0
         pv = float(df["Purchase_Value"].sum()) if "Purchase_Value" in df.columns else 0.0
+        atc = (
+            float(df["Adds_to_Cart"].sum())
+            if "Adds_to_Cart" in df.columns
+            else 0.0
+        )
+        ichk = (
+            float(df["Checkouts_Initiated"].sum())
+            if "Checkouts_Initiated" in df.columns
+            else 0.0
+        )
         summary.append(
             _pad(
                 width,
@@ -240,6 +250,10 @@ def sheet_values_with_summary(
                     round(pur, 2),
                     "Purchase_Value",
                     round(pv, 2),
+                    "Adds_to_Cart",
+                    round(atc, 2),
+                    "Checkouts_Initiated",
+                    round(ichk, 2),
                     "",
                 ],
             )

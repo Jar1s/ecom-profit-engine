@@ -43,6 +43,13 @@ _META_CAMPAIGN_COLUMNS = [
     "Ad_Spend",
     "Impressions",
     "Clicks",
+    "CPM",
+    "CPC_All",
+    "CPC_Link",
+    "CTR_All_pct",
+    "CTR_Link_pct",
+    "Adds_to_Cart",
+    "Checkouts_Initiated",
     "Purchases",
     "Purchase_Value",
 ]

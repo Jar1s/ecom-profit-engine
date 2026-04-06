@@ -96,6 +96,38 @@ def _pick_purchase_key(
     return None
 
 
+# First matching type wins (avoids double-counting overlapping Meta action rows).
+_ADD_TO_CART_ACTION_TYPES: tuple[str, ...] = (
+    "offsite_conversion.fb_pixel_add_to_cart",
+    "add_to_cart",
+    "omni_add_to_cart",
+)
+_INITIATE_CHECKOUT_ACTION_TYPES: tuple[str, ...] = (
+    "offsite_conversion.fb_pixel_initiate_checkout",
+    "initiate_checkout",
+    "omni_initiated_checkout",
+)
+
+
+def conversion_count_from_actions(actions: Any, type_order: tuple[str, ...]) -> float:
+    """Single canonical conversion count from `actions` (same priority idea as purchases)."""
+    ac = _action_list_to_map(actions)
+    for key in type_order:
+        if key in ac:
+            return ac[key]
+    return 0.0
+
+
+def _insight_float(row: dict[str, Any], key: str) -> float:
+    try:
+        v = row.get(key)
+        if v is None or v == "":
+            return 0.0
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def purchase_metrics_from_insights(
     actions: Any,
     action_values: Any,
@@ -148,8 +180,8 @@ def fetch_meta_daily_spend(settings: Settings) -> list[dict[str, Any]]:
 
 def fetch_meta_campaign_insights(settings: Settings) -> list[dict[str, Any]]:
     """
-    Daily rows per campaign: Date, Campaign_ID, Campaign_Name, Ad_Spend, Impressions,
-    Clicks, Purchases (conversion count from actions), Purchase_Value (from action_values).
+    Daily rows per campaign: spend, delivery, rates (CPM, CPC, CTR), funnel conversions
+    from actions (purchases, add to cart, initiate checkout), purchase value.
     """
     act_id = _normalize_ad_account_id(settings.ad_account_id)
     base = f"https://graph.facebook.com/{settings.meta_api_version}/act_{act_id}/insights"
@@ -160,7 +192,9 @@ def fetch_meta_campaign_insights(settings: Settings) -> list[dict[str, Any]]:
         "access_token": access_token,
         "level": "campaign",
         "fields": (
-            "date_start,campaign_id,campaign_name,spend,impressions,clicks,actions,action_values"
+            "date_start,campaign_id,campaign_name,spend,impressions,clicks,"
+            "cpm,cpc,ctr,cost_per_inline_link_click,inline_link_click_ctr,"
+            "actions,action_values"
         ),
         "time_increment": "1",
         "time_range": time_range,
@@ -193,6 +227,10 @@ def fetch_meta_campaign_insights(settings: Settings) -> list[dict[str, Any]]:
             d.get("action_values"),
             purchase_action_types=settings.meta_purchase_action_types,
         )
+        adds_cart = conversion_count_from_actions(d.get("actions"), _ADD_TO_CART_ACTION_TYPES)
+        checkouts = conversion_count_from_actions(
+            d.get("actions"), _INITIATE_CHECKOUT_ACTION_TYPES
+        )
         rows.append(
             {
                 "Date": ds,
@@ -201,6 +239,13 @@ def fetch_meta_campaign_insights(settings: Settings) -> list[dict[str, Any]]:
                 "Ad_Spend": round(spend, 2),
                 "Impressions": impressions,
                 "Clicks": clicks,
+                "CPM": round(_insight_float(d, "cpm"), 4),
+                "CPC_All": round(_insight_float(d, "cpc"), 4),
+                "CPC_Link": round(_insight_float(d, "cost_per_inline_link_click"), 4),
+                "CTR_All_pct": round(_insight_float(d, "ctr"), 4),
+                "CTR_Link_pct": round(_insight_float(d, "inline_link_click_ctr"), 4),
+                "Adds_to_Cart": round(adds_cart, 2),
+                "Checkouts_Initiated": round(checkouts, 2),
                 "Purchases": round(purchases, 2),
                 "Purchase_Value": round(purchase_value, 2),
             }

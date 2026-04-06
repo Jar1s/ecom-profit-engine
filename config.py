@@ -25,12 +25,14 @@ class Settings:
     meta_token: str
     meta_app_id: str | None
     meta_app_secret: str | None
+    meta_fb_exchange: bool
     ad_account_id: str
     meta_api_version: str
     meta_lookback_days: int
     meta_time_range_since: str | None
     meta_time_range_until: str | None
-    google_sheet_name: str
+    google_sheet_id: str | None
+    google_sheet_name: str | None
     google_creds_path: Path | None
     google_service_account_info: dict[str, Any] | None
     supplier_csv_path: Path
@@ -59,6 +61,33 @@ def _optional_float(name: str, default: float) -> float:
     return float(raw)
 
 
+def _strip_wrapped_quotes(raw: str) -> str:
+    """Remove accidental surrounding quotes from pasted env values."""
+    s = raw.strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in "\"'":
+        s = s[1:-1].strip()
+    return s
+
+
+def _env_bool(name: str, default: bool = True) -> bool:
+    """False if env is 0/false/no/off (case-insensitive); True if unset or other."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def _normalize_shopify_store(raw: str) -> str:
+    """Accept store.myshopify.com or https://store.myshopify.com/ (common paste mistakes)."""
+    s = raw.strip()
+    if s.startswith("https://"):
+        s = s[8:]
+    elif s.startswith("http://"):
+        s = s[7:]
+    s = s.split("/")[0].strip()
+    return s.lower()
+
+
 def load_settings() -> Settings:
     csv_rel = os.getenv("SUPPLIER_COSTS_CSV", "data/supplier_costs.csv").strip()
 
@@ -79,9 +108,9 @@ def load_settings() -> Settings:
         google_creds_path = (_ROOT / creds).resolve()
         google_info = None
 
-    shopify_token = os.getenv("SHOPIFY_TOKEN", "").strip() or None
-    shopify_client_id = os.getenv("SHOPIFY_CLIENT_ID", "").strip() or None
-    shopify_client_secret = os.getenv("SHOPIFY_CLIENT_SECRET", "").strip() or None
+    shopify_token = _strip_wrapped_quotes(os.getenv("SHOPIFY_TOKEN", "")).strip() or None
+    shopify_client_id = _strip_wrapped_quotes(os.getenv("SHOPIFY_CLIENT_ID", "")).strip() or None
+    shopify_client_secret = _strip_wrapped_quotes(os.getenv("SHOPIFY_CLIENT_SECRET", "")).strip() or None
 
     if shopify_token and (shopify_client_id or shopify_client_secret):
         raise RuntimeError(
@@ -100,21 +129,34 @@ def load_settings() -> Settings:
     if meta_app_secret and not meta_app_id:
         raise RuntimeError("META_APP_ID is required when META_APP_SECRET is set.")
 
+    shopify_store = _normalize_shopify_store(_require("SHOPIFY_STORE"))
+    meta_token = _strip_wrapped_quotes(_require("META_TOKEN"))
+
+    google_sheet_id = os.getenv("GOOGLE_SHEET_ID", "").strip() or None
+    google_sheet_name = os.getenv("GOOGLE_SHEET_NAME", "").strip() or None
+    if not google_sheet_id and not google_sheet_name:
+        raise RuntimeError(
+            "Set GOOGLE_SHEET_NAME (open by title, needs Drive API) and/or "
+            "GOOGLE_SHEET_ID (from spreadsheet URL; only Sheets API required)."
+        )
+
     return Settings(
-        shopify_store=_require("SHOPIFY_STORE"),
+        shopify_store=shopify_store,
         shopify_token=shopify_token,
         shopify_client_id=shopify_client_id,
         shopify_client_secret=shopify_client_secret,
         shopify_api_version=os.getenv("SHOPIFY_API_VERSION", "2024-10").strip(),
-        meta_token=_require("META_TOKEN"),
+        meta_token=meta_token,
         meta_app_id=meta_app_id,
         meta_app_secret=meta_app_secret,
+        meta_fb_exchange=_env_bool("META_FB_EXCHANGE", True),
         ad_account_id=_require("AD_ACCOUNT_ID"),
         meta_api_version=os.getenv("META_API_VERSION", "v18.0").strip(),
         meta_lookback_days=_optional_int("META_LOOKBACK_DAYS", 90),
         meta_time_range_since=os.getenv("META_TIME_RANGE_SINCE", "").strip() or None,
         meta_time_range_until=os.getenv("META_TIME_RANGE_UNTIL", "").strip() or None,
-        google_sheet_name=_require("GOOGLE_SHEET_NAME"),
+        google_sheet_id=google_sheet_id,
+        google_sheet_name=google_sheet_name,
         google_creds_path=google_creds_path,
         google_service_account_info=google_info,
         supplier_csv_path=(_ROOT / csv_rel).resolve(),

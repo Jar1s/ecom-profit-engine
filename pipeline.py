@@ -75,7 +75,8 @@ def main() -> int:
         daily_final = merge_daily_with_meta(daily_df, meta_rows)
 
         phase = "sheets"
-        logger.info("Uploading to Google Sheets %r …", settings.google_sheet_name)
+        _sheet_target = settings.google_sheet_id or settings.google_sheet_name
+        logger.info("Uploading to Google Sheets %r …", _sheet_target)
         upload_dataframe(settings, orders_df, SHEET_ORDERS_DB)
         upload_dataframe(settings, order_df, SHEET_ORDER_LEVEL)
         upload_dataframe(settings, meta_df, SHEET_META_DATA)

@@ -16,13 +16,21 @@ def get_meta_access_token(settings: Settings) -> str:
     """
     Return access token for Graph API.
 
-    If META_APP_ID and META_APP_SECRET are set, exchanges META_TOKEN for a fresh
-    long-lived user token (~60 days per Meta). Use the same user token you get
-    from Graph API Explorer (short or long) as META_TOKEN.
+    If META_APP_ID, META_APP_SECRET, and META_FB_EXCHANGE (default true) are set,
+    exchanges META_TOKEN via fb_exchange_token for a long-lived user token (~60d).
 
-    If app id/secret are omitted, META_TOKEN is used as-is (you must rotate it manually).
+    If app id/secret are omitted, or META_FB_EXCHANGE is 0/false, META_TOKEN is
+    used as-is (use a long-lived token from Business Manager / Graph Explorer).
+
+    Exchange requires META_TOKEN to still be valid; if it expired (error 190),
+    generate a new user token with ads_read and update META_TOKEN.
     """
-    if not settings.meta_app_id or not settings.meta_app_secret:
+    use_exchange = (
+        bool(settings.meta_app_id)
+        and bool(settings.meta_app_secret)
+        and settings.meta_fb_exchange
+    )
+    if not use_exchange:
         return settings.meta_token
     return _exchange_token(settings)
 
@@ -37,6 +45,7 @@ def _exchange_token(settings: Settings) -> str:
     }
     r = requests.get(url, params=params, timeout=60)
     if not r.ok:
+        code: int | None = None
         try:
             body = r.json()
             err = body.get("error", {})
@@ -50,9 +59,15 @@ def _exchange_token(settings: Settings) -> str:
         except ValueError:
             msg = r.text
             hint = ""
+        extra = ""
+        if code == 190 or (isinstance(msg, str) and "expired" in msg.lower()):
+            extra = (
+                " META_TOKEN session expired — open Graph API Explorer, generate a new user "
+                "token with ads_read, set META_TOKEN on Vercel, redeploy. "
+                "Or set META_FB_EXCHANGE=0 and put a non-expired long-lived token in META_TOKEN."
+            )
         raise RuntimeError(
-            f"Meta token exchange failed ({r.status_code}){hint}: {msg}. "
-            "Check META_TOKEN (user token with ads_read), META_APP_ID, META_APP_SECRET."
+            f"Meta token exchange failed ({r.status_code}){hint}: {msg}.{extra}"
         ) from None
 
     data: dict[str, Any] = r.json()

@@ -1,0 +1,19 @@
+# Shopify Partners → Apps → [tvoja app] → Client ID (nie secret)
+# Najprv spojenie s existujúcou app: shopify app config link --client-id "<CLIENT_ID>"
+# Potom deploy konfigurácie (scopes): shopify app deploy --allow-updates -f
+
+name = "read_order"
+client_id = "ea39e841d822136fb6a09e7ae9dd0bd0"
+application_url = "https://example.com"
+embedded = true
+
+[access_scopes]
+scopes = "read_orders"
+
+[auth]
+redirect_urls = [
+  "https://example.com/api/auth/callback",
+]
+
+[webhooks]
+api_version = "2026-04"

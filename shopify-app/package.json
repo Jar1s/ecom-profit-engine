@@ -1,0 +1,6 @@
+{
+  "name": "read-order-shopify-config",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Minimal package for shopify app deploy (config-only; Python pipeline lives in parent)"
+}

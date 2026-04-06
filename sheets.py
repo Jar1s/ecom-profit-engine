@@ -14,7 +14,8 @@ from config import Settings
 
 logger = logging.getLogger(__name__)
 
-_SCOPES = (
+_SCOPES_SHEETS_ONLY = ("https://www.googleapis.com/auth/spreadsheets",)
+_SCOPES_WITH_DRIVE = (
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 )
@@ -24,10 +25,16 @@ _DEFAULT_ROW_CHUNK = 500
 
 
 def _authorize(settings: Settings) -> gspread.Client:
+    # Opening by spreadsheet ID uses only Sheets API; opening by title lists Drive files.
+    scopes = (
+        list(_SCOPES_SHEETS_ONLY)
+        if settings.google_sheet_id
+        else list(_SCOPES_WITH_DRIVE)
+    )
     if settings.google_service_account_info is not None:
         creds = Credentials.from_service_account_info(
             settings.google_service_account_info,
-            scopes=list(_SCOPES),
+            scopes=scopes,
         )
         return gspread.authorize(creds)
     path = settings.google_creds_path
@@ -35,8 +42,42 @@ def _authorize(settings: Settings) -> gspread.Client:
         raise FileNotFoundError(
             "Google credentials: set GOOGLE_CREDENTIALS_JSON (Vercel) or GOOGLE_CREDS file path"
         )
-    creds = Credentials.from_service_account_file(str(path), scopes=list(_SCOPES))
+    creds = Credentials.from_service_account_file(str(path), scopes=scopes)
     return gspread.authorize(creds)
+
+
+def _open_spreadsheet(client: gspread.Client, settings: Settings) -> gspread.Spreadsheet:
+    """
+    Open by GOOGLE_SHEET_ID (recommended) or by exact title (GOOGLE_SHEET_NAME).
+    Title search uses Drive API; name must match the file title and the sheet must
+    be shared with the service account (Editor).
+    """
+    try:
+        if settings.google_sheet_id:
+            return client.open_by_key(settings.google_sheet_id.strip())
+        assert settings.google_sheet_name is not None
+        name = settings.google_sheet_name.strip()
+        return client.open(name)
+    except gspread.exceptions.SpreadsheetNotFound as exc:
+        sa_hint = (
+            "Share the spreadsheet with the service account email (Editor) from the JSON."
+        )
+        if settings.google_sheet_id:
+            raise RuntimeError(
+                f"Spreadsheet id not found or no access ({settings.google_sheet_id!r}). "
+                f"{sa_hint} Check GOOGLE_SHEET_ID matches the URL between /d/ and /edit."
+            ) from exc
+        raise RuntimeError(
+            f"No spreadsheet titled {settings.google_sheet_name!r} found for this account "
+            f"(search is exact). {sa_hint} "
+            "Or set GOOGLE_SHEET_ID from the sheet URL and redeploy."
+        ) from exc
+    except gspread.exceptions.APIError as exc:
+        raise RuntimeError(
+            f"Google Sheets API error: {exc}. "
+            "Enable Sheets API (and Drive API if opening by name only) for the GCP project; "
+            "share the file with the service account."
+        ) from exc
 
 
 def dataframe_to_values(df: pd.DataFrame) -> list[list[object]]:
@@ -58,7 +99,7 @@ def upload_dataframe(
 ) -> None:
     """Clear worksheet and write dataframe (batch by row chunks)."""
     client = _authorize(settings)
-    sh = client.open(settings.google_sheet_name)
+    sh = _open_spreadsheet(client, settings)
     logger.info(
         "Sheets target: file=%r spreadsheet_id=%s tab=%r data_rows=%s",
         sh.title,

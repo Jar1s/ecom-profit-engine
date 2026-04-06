@@ -1,4 +1,4 @@
-"""Vercel Serverless: this file maps to URL /api/cron. FastAPI routes use path / inside the function."""
+"""Vercel Python entrypoint: must be named index.py (or app.py, …) and export `app`."""
 
 from __future__ import annotations
 
@@ -31,8 +31,14 @@ def _check_auth(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-@app.api_route("/", methods=["GET", "POST"])
+@app.get("/")
+def health() -> dict[str, str]:
+    return {"service": "ecom-profit-engine", "pipeline": "/api/cron"}
+
+
+@app.api_route("/cron", methods=["GET", "POST"])
 def run_pipeline(authorization: str | None = Header(default=None)) -> JSONResponse:
+    """Served at https://<host>/api/cron when this app is mounted under /api."""
     _check_auth(authorization)
     try:
         from pipeline import main

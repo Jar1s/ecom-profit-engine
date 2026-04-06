@@ -10,6 +10,10 @@ from config import Settings
 
 SheetKind = Literal["orders", "order_level", "meta", "meta_campaigns", "daily"]
 
+# Summary rows need enough columns; narrow dataframes (e.g. META_DATA with 3 cols) would otherwise
+# truncate _pad(..., row) and drop trailing cells (including local-currency totals).
+_MIN_GRID_COLS = 8
+
 
 def _pad(width: int, row: list[Any]) -> list[Any]:
     r = list(row)
@@ -44,7 +48,7 @@ def sheet_values_with_summary(
         header = list(df.columns) if len(df.columns) else ["(no data)"]
     else:
         header = [str(c) for c in df.columns]
-    width = max(len(header), 1)
+    width = max(len(header), _MIN_GRID_COLS)
 
     cur = settings.report_currency.strip() or "—"
     rate = settings.usd_per_local
@@ -177,13 +181,14 @@ def sheet_values_with_summary(
                 [title, f"Mena účtu: {cur}", f"USD/1: {rate_s}", "", "", "", "", ""],
             )
         )
+        spend_lbl = f"Ad_Spend ({cur})" if cur and cur != "—" else "Ad_Spend"
         summary.append(
             _pad(
                 width,
                 [
                     "Súčty",
                     f"Dní v tabuľke: {n}",
-                    "Ad_Spend",
+                    spend_lbl,
                     round(spend, 2),
                     "",
                     "",

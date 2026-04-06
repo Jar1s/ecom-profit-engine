@@ -110,7 +110,7 @@ def sheet_values_with_summary(
                     width,
                     [
                         "Tip",
-                        "Pre stĺpce *_USD nastav env USD_PER_LOCAL_UNIT (napr. 1.08 pre EUR→USD).",
+                        "Pre stĺpce *_USD nastav USD_PER_LOCAL_UNIT (napr. 0.65 ak 1 AUD ≈ 0.65 USD).",
                         "",
                         "",
                         "",

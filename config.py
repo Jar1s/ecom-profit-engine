@@ -192,7 +192,7 @@ def load_settings() -> Settings:
         supplier_csv_path=(_ROOT / csv_rel).resolve(),
         http_max_retries=max(1, _optional_int("HTTP_MAX_RETRIES", 5)),
         http_backoff_base_seconds=max(0.1, _optional_float("HTTP_BACKOFF_BASE_SECONDS", 1.5)),
-        report_currency=os.getenv("REPORT_CURRENCY", "EUR").strip(),
+        report_currency=os.getenv("REPORT_CURRENCY", "AUD").strip(),
         usd_per_local=_optional_positive_float_or_none("USD_PER_LOCAL_UNIT"),
         sheets_fancy_layout=_env_bool("SHEETS_FANCY_LAYOUT", True),
     )

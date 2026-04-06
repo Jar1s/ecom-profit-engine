@@ -113,7 +113,7 @@ def merge_daily_with_meta(daily: pd.DataFrame, meta_rows: list[dict[str, Any]]) 
 def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.DataFrame:
     """
     Append *_USD columns by multiplying local currency columns by USD_PER_LOCAL_UNIT
-    (how many USD for one unit of shop/report currency, e.g. 1.08 for EUR→USD).
+    (how many USD for one unit of shop/report currency, e.g. 0.65 if 1 AUD ≈ 0.65 USD).
     """
     if not usd_per_local or usd_per_local <= 0:
         return df

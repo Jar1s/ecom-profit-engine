@@ -70,7 +70,7 @@ def _open_spreadsheet(client: gspread.Client, settings: Settings) -> gspread.Spr
         raise RuntimeError(
             f"No spreadsheet titled {settings.google_sheet_name!r} found for this account "
             f"(search is exact). {sa_hint} "
-            "Or set GOOGLE_SHEET_ID from the sheet URL and redeploy."
+            "Or set GOOGLE_SHEET_ID or GOOGLE_SHEET_URL (full browser URL) and redeploy."
         ) from exc
     except gspread.exceptions.APIError as exc:
         raise RuntimeError(

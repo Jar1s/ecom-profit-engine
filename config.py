@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _ROOT = Path(__file__).resolve().parent
+
+_GOOGLE_SHEET_ID_IN_URL = re.compile(
+    r"/spreadsheets/d/([a-zA-Z0-9_-]+)", re.IGNORECASE
+)
+
+
+def _google_sheet_id_from_url(url: str) -> str | None:
+    m = _GOOGLE_SHEET_ID_IN_URL.search(url.strip())
+    return m.group(1) if m else None
 
 
 @dataclass(frozen=True)
@@ -133,11 +143,19 @@ def load_settings() -> Settings:
     meta_token = _strip_wrapped_quotes(_require("META_TOKEN"))
 
     google_sheet_id = os.getenv("GOOGLE_SHEET_ID", "").strip() or None
+    sheet_url = os.getenv("GOOGLE_SHEET_URL", "").strip() or None
+    if not google_sheet_id and sheet_url:
+        google_sheet_id = _google_sheet_id_from_url(sheet_url)
+        if not google_sheet_id:
+            raise RuntimeError(
+                "GOOGLE_SHEET_URL must contain .../spreadsheets/d/SHEET_ID/... "
+                "(paste the browser URL of the spreadsheet)."
+            )
     google_sheet_name = os.getenv("GOOGLE_SHEET_NAME", "").strip() or None
     if not google_sheet_id and not google_sheet_name:
         raise RuntimeError(
             "Set GOOGLE_SHEET_NAME (open by title, needs Drive API) and/or "
-            "GOOGLE_SHEET_ID (from spreadsheet URL; only Sheets API required)."
+            "GOOGLE_SHEET_ID or GOOGLE_SHEET_URL (open by id; only Sheets API required)."
         )
 
     return Settings(

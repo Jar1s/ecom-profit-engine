@@ -69,34 +69,52 @@ def _paginate_insights(
     return out
 
 
-def _purchase_metrics(actions: Any, action_values: Any) -> tuple[float, float]:
-    """
-    Sum Meta conversion counts and values for action types whose name contains 'purchase'.
-    Covers purchase, omni_purchase, offsite_conversion.fb_pixel_purchase, etc.
-    """
-    purchase_count = 0.0
-    purchase_value = 0.0
-    for item in actions or []:
+def _action_list_to_map(items: Any) -> dict[str, float]:
+    """Meta sometimes sends duplicate action_type rows; sum values per type."""
+    out: dict[str, float] = {}
+    for item in items or []:
         if not isinstance(item, dict):
             continue
-        at = str(item.get("action_type") or "")
-        if "purchase" not in at.lower():
+        at = str(item.get("action_type") or "").strip()
+        if not at:
             continue
         try:
-            purchase_count += float(item.get("value") or 0)
+            v = float(item.get("value") or 0)
         except (TypeError, ValueError):
-            pass
-    for item in action_values or []:
-        if not isinstance(item, dict):
             continue
-        at = str(item.get("action_type") or "")
-        if "purchase" not in at.lower():
-            continue
-        try:
-            purchase_value += float(item.get("value") or 0)
-        except (TypeError, ValueError):
-            pass
-    return purchase_count, purchase_value
+        out[at] = out.get(at, 0.0) + v
+    return out
+
+
+def _pick_purchase_key(
+    order: tuple[str, ...], ac: dict[str, float], av: dict[str, float]
+) -> str | None:
+    """First action_type in priority that appears in actions or action_values (same row in Meta)."""
+    for key in order:
+        if key in ac or key in av:
+            return key
+    return None
+
+
+def purchase_metrics_from_insights(
+    actions: Any,
+    action_values: Any,
+    *,
+    purchase_action_types: tuple[str, ...],
+) -> tuple[float, float]:
+    """
+    Count and value for **one** canonical purchase action_type.
+
+    Summing every action whose name contains \"purchase\" inflates totals: Meta often returns
+    both `purchase` and `offsite_conversion.fb_pixel_purchase` for overlapping conversions.
+    Ads Manager uses one primary metric; we take the first matching type from the configured order.
+    """
+    ac = _action_list_to_map(actions)
+    av = _action_list_to_map(action_values)
+    key = _pick_purchase_key(purchase_action_types, ac, av)
+    if key is None:
+        return 0.0, 0.0
+    return ac.get(key, 0.0), av.get(key, 0.0)
 
 
 def fetch_meta_daily_spend(settings: Settings) -> list[dict[str, Any]]:
@@ -148,6 +166,10 @@ def fetch_meta_campaign_insights(settings: Settings) -> list[dict[str, Any]]:
         "time_range": time_range,
         "limit": "500",
     }
+    if settings.meta_action_attribution_windows:
+        first_params["action_attribution_windows"] = json.dumps(
+            list(settings.meta_action_attribution_windows)
+        )
     data = _paginate_insights(settings, base, first_params)
     rows: list[dict[str, Any]] = []
     for d in data:
@@ -166,7 +188,11 @@ def fetch_meta_campaign_insights(settings: Settings) -> list[dict[str, Any]]:
             clicks = int(float(d.get("clicks") or 0))
         except (TypeError, ValueError):
             clicks = 0
-        purchases, purchase_value = _purchase_metrics(d.get("actions"), d.get("action_values"))
+        purchases, purchase_value = purchase_metrics_from_insights(
+            d.get("actions"),
+            d.get("action_values"),
+            purchase_action_types=settings.meta_purchase_action_types,
+        )
         rows.append(
             {
                 "Date": ds,

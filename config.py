@@ -52,6 +52,8 @@ class Settings:
     report_currency: str
     usd_per_local: float | None
     sheets_fancy_layout: bool
+    meta_purchase_action_types: tuple[str, ...]
+    meta_action_attribution_windows: tuple[str, ...] | None
 
 
 def _require(name: str) -> str:
@@ -73,6 +75,44 @@ def _optional_float(name: str, default: float) -> float:
     if raw is None or raw.strip() == "":
         return default
     return float(raw)
+
+
+def _meta_purchase_action_types() -> tuple[str, ...]:
+    """
+    Ordered list: first matching Meta action_type wins (avoids double-counting when
+    both `purchase` and `offsite_conversion.fb_pixel_purchase` appear for the same conversions).
+    Override: META_PURCHASE_ACTION_TYPES=offsite_conversion.fb_pixel_purchase,purchase
+    """
+    raw = os.getenv("META_PURCHASE_ACTION_TYPES", "").strip()
+    if raw:
+        return tuple(x.strip() for x in raw.split(",") if x.strip())
+    return (
+        "offsite_conversion.fb_pixel_purchase",
+        "purchase",
+        "omni_purchase",
+        "onsite_conversion.purchase",
+    )
+
+
+def _meta_action_attribution_windows() -> tuple[str, ...] | None:
+    """
+    Optional JSON array, e.g. ["7d_click","1d_view"] to align with Ads Manager columns.
+    META_ACTION_ATTRIBUTION_WINDOWS=
+    """
+    raw = os.getenv("META_ACTION_ATTRIBUTION_WINDOWS", "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "META_ACTION_ATTRIBUTION_WINDOWS must be valid JSON array, e.g. "
+            '["7d_click","1d_view"]'
+        ) from exc
+    if not isinstance(parsed, list):
+        raise RuntimeError("META_ACTION_ATTRIBUTION_WINDOWS must be a JSON array")
+    out = tuple(str(x).strip() for x in parsed if str(x).strip())
+    return out if out else None
 
 
 def _optional_positive_float_or_none(name: str) -> float | None:
@@ -197,4 +237,6 @@ def load_settings() -> Settings:
         report_currency=os.getenv("REPORT_CURRENCY", "AUD").strip(),
         usd_per_local=_optional_positive_float_or_none("USD_PER_LOCAL_UNIT"),
         sheets_fancy_layout=_env_bool("SHEETS_FANCY_LAYOUT", True),
+        meta_purchase_action_types=_meta_purchase_action_types(),
+        meta_action_attribution_windows=_meta_action_attribution_windows(),
     )

@@ -8,6 +8,7 @@ from typing import Any
 import requests
 
 from config import Settings
+from http_retry import _sleep_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,38 @@ def get_meta_access_token(settings: Settings) -> str:
     return _exchange_token(settings)
 
 
+def _exchange_error_message(r: requests.Response) -> RuntimeError:
+    code: int | None = None
+    try:
+        body = r.json()
+        err = body.get("error", {})
+        if isinstance(err, dict):
+            msg = err.get("message", r.text)
+            code = err.get("code")
+            hint = f" (code {code})" if code is not None else ""
+        else:
+            msg = str(err)
+            hint = ""
+    except ValueError:
+        msg = r.text
+        hint = ""
+    extra = ""
+    if code == 190 or (isinstance(msg, str) and "expired" in msg.lower()):
+        extra = (
+            " META_TOKEN session expired — open Graph API Explorer, generate a new user "
+            "token with ads_read, set META_TOKEN on Vercel, redeploy. "
+            "Or set META_FB_EXCHANGE=0 and put a non-expired long-lived token in META_TOKEN."
+        )
+    elif r.status_code >= 500 or r.status_code == 429:
+        extra = (
+            " Transient Meta / Graph error — retries are applied automatically. "
+            "If this persists, set META_FB_EXCHANGE=0 and store a long-lived token in META_TOKEN."
+        )
+    return RuntimeError(
+        f"Meta token exchange failed ({r.status_code}){hint}: {msg}.{extra}"
+    )
+
+
 def _exchange_token(settings: Settings) -> str:
     url = f"https://graph.facebook.com/{settings.meta_api_version}/oauth/access_token"
     params: dict[str, str] = {
@@ -43,40 +76,31 @@ def _exchange_token(settings: Settings) -> str:
         "client_secret": settings.meta_app_secret,
         "fb_exchange_token": settings.meta_token,
     }
-    r = requests.get(url, params=params, timeout=60)
-    if not r.ok:
-        code: int | None = None
-        try:
-            body = r.json()
-            err = body.get("error", {})
-            if isinstance(err, dict):
-                msg = err.get("message", r.text)
-                code = err.get("code")
-                hint = f" (code {code})" if code is not None else ""
-            else:
-                msg = str(err)
-                hint = ""
-        except ValueError:
-            msg = r.text
-            hint = ""
-        extra = ""
-        if code == 190 or (isinstance(msg, str) and "expired" in msg.lower()):
-            extra = (
-                " META_TOKEN session expired — open Graph API Explorer, generate a new user "
-                "token with ads_read, set META_TOKEN on Vercel, redeploy. "
-                "Or set META_FB_EXCHANGE=0 and put a non-expired long-lived token in META_TOKEN."
+    attempt = 0
+    while attempt < settings.http_max_retries:
+        r = requests.get(url, params=params, timeout=60)
+        if r.status_code == 429 or r.status_code >= 500:
+            if attempt + 1 >= settings.http_max_retries:
+                raise _exchange_error_message(r)
+            logger.warning(
+                "Meta token exchange HTTP %s (attempt %s/%s), retrying after backoff…",
+                r.status_code,
+                attempt + 1,
+                settings.http_max_retries,
             )
-        raise RuntimeError(
-            f"Meta token exchange failed ({r.status_code}){hint}: {msg}.{extra}"
-        ) from None
+            _sleep_backoff(settings, attempt)
+            attempt += 1
+            continue
+        if not r.ok:
+            raise _exchange_error_message(r)
 
-    data: dict[str, Any] = r.json()
-    token = data.get("access_token")
-    if not token:
-        raise RuntimeError("Meta token exchange response missing access_token")
-    expires_in = data.get("expires_in")
-    if expires_in is not None:
-        logger.info("Meta: exchanged token (expires_in=%s s)", expires_in)
-    else:
-        logger.info("Meta: exchanged token (no expires_in in response)")
-    return str(token)
+        data: dict[str, Any] = r.json()
+        token = data.get("access_token")
+        if not token:
+            raise RuntimeError("Meta token exchange response missing access_token")
+        expires_in = data.get("expires_in")
+        if expires_in is not None:
+            logger.info("Meta: exchanged token (expires_in=%s s)", expires_in)
+        else:
+            logger.info("Meta: exchanged token (no expires_in in response)")
+        return str(token)

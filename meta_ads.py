@@ -9,6 +9,7 @@ from typing import Any
 
 from config import Settings
 from http_retry import get_json
+from meta_auth import get_meta_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +44,13 @@ def fetch_meta_daily_spend(settings: Settings) -> list[dict[str, Any]]:
     url: str | None = base
     params: dict[str, Any] | None = None
     page = 0
+    access_token = get_meta_access_token(settings)
 
     while url:
         page += 1
         if url == base:
             params = {
-                "access_token": settings.meta_token,
+                "access_token": access_token,
                 "fields": "date_start,spend",
                 "time_increment": "1",
                 "time_range": time_range,
@@ -66,7 +68,8 @@ def fetch_meta_daily_spend(settings: Settings) -> list[dict[str, Any]]:
             if code in (190, 102):
                 raise RuntimeError(
                     f"Meta API authentication failed{sub}: {msg}. "
-                    "Refresh META_TOKEN (long-lived system user token recommended)."
+                    "Update META_TOKEN; with META_APP_ID + META_APP_SECRET the pipeline "
+                    "refreshes long-lived tokens each run."
                 ) from None
             raise RuntimeError(f"Meta API error{sub}: {msg}") from None
 

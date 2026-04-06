@@ -7,7 +7,8 @@ import re
 from typing import Any
 
 from config import Settings
-from http_retry import get_json, get_response
+from http_retry import get_response
+from shopify_auth import get_shopify_access_token
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,6 @@ def fetch_all_orders(settings: Settings) -> list[dict[str, Any]]:
         f"https://{settings.shopify_store}/admin/api/"
         f"{settings.shopify_api_version}/orders.json"
     )
-    headers = {"X-Shopify-Access-Token": settings.shopify_token}
     params: dict[str, Any] = {"status": "any", "limit": 250}
 
     orders: list[dict[str, Any]] = []
@@ -38,6 +38,7 @@ def fetch_all_orders(settings: Settings) -> list[dict[str, Any]]:
 
     while url:
         page += 1
+        headers = {"X-Shopify-Access-Token": get_shopify_access_token(settings)}
         if url == base:
             response = get_response(url, settings=settings, params=params, headers=headers)
         else:

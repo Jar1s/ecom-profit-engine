@@ -1,5 +1,7 @@
-# Scheduled run: set secrets SHOPIFY_STORE, SHOPIFY_TOKEN, META_TOKEN, AD_ACCOUNT_ID,
+# Scheduled run: set secrets SHOPIFY_STORE, META_TOKEN, AD_ACCOUNT_ID,
 # GOOGLE_SHEET_NAME, GOOGLE_CREDENTIALS_JSON (full service account JSON text).
+# Shopify: either SHOPIFY_TOKEN or SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET.
+# Optional Meta long-lived refresh: META_APP_ID, META_APP_SECRET (with META_TOKEN).
 
 name: Ecom Profit Engine
 
@@ -27,7 +29,11 @@ jobs:
         env:
           SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
           SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
           META_TOKEN: ${{ secrets.META_TOKEN }}
+          META_APP_ID: ${{ secrets.META_APP_ID }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
           AD_ACCOUNT_ID: ${{ secrets.AD_ACCOUNT_ID }}
           GOOGLE_SHEET_NAME: ${{ secrets.GOOGLE_SHEET_NAME }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}

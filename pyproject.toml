@@ -2,7 +2,7 @@
 name = "ecom-profit-engine"
 version = "0.1.0"
 requires-python = ">=3.12"
-# Dependencies stay in requirements.txt for simple local/CI installs; Vercel reads both.
+# Runtime deps live in requirements.txt; Vercel installs them via installCommand in vercel.json.
 
 [project.scripts]
 # Tells Vercel where the ASGI app lives (see FastAPI on Vercel → Exporting the application).

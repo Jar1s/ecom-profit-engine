@@ -21,7 +21,7 @@ Order dates use Shopify `created_at` (ISO UTC). For store-local “business days
 
 ## Environment variables
 
-See `.env.example`. Required: `SHOPIFY_STORE`, `SHOPIFY_TOKEN`, `META_TOKEN`, `AD_ACCOUNT_ID`, `GOOGLE_SHEET_NAME`. For Google auth, set **`GOOGLE_CREDENTIALS_JSON`** (recommended for hosted runs) or **`GOOGLE_CREDS`** path to a JSON file.
+See `.env.example`. Required: `SHOPIFY_STORE`, `META_TOKEN`, `AD_ACCOUNT_ID`, `GOOGLE_SHEET_NAME`. **Shopify:** either `SHOPIFY_TOKEN` (custom app) **or** `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` (Dev Dashboard app; short-lived token is fetched and cached for the run). Do not mix both. **Meta (long-lived):** set optional `META_APP_ID` + `META_APP_SECRET` (same app as the token); each pipeline run exchanges `META_TOKEN` for a refreshed long-lived user token via `fb_exchange_token` (~60 days per Meta). Omit them if you use a static system user token and rotate manually. For Google auth, set **`GOOGLE_CREDENTIALS_JSON`** (recommended for hosted runs) or **`GOOGLE_CREDS`** path to a JSON file.
 
 Meta date range: either `META_LOOKBACK_DAYS` (default 90, ending today) or both `META_TIME_RANGE_SINCE` and `META_TIME_RANGE_UNTIL` (`YYYY-MM-DD`).
 
@@ -52,7 +52,9 @@ Run every 2 hours (adjust path):
 
 Use a scheduled workflow with repository secrets:
 
-- `SHOPIFY_STORE`, `SHOPIFY_TOKEN`, `META_TOKEN`, `AD_ACCOUNT_ID`, `GOOGLE_SHEET_NAME`
+- `SHOPIFY_STORE`, `META_TOKEN`, `AD_ACCOUNT_ID`, `GOOGLE_SHEET_NAME`
+- Shopify auth: either `SHOPIFY_TOKEN` or `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET`
+- Optional Meta long-lived refresh: `META_APP_ID`, `META_APP_SECRET`
 - `GOOGLE_CREDENTIALS_JSON` — **full** service account JSON string (secret)
 
 The workflow passes `GOOGLE_CREDENTIALS_JSON` directly into the process (no file on disk). See [.github/workflows/ecom-profit-engine.yml](.github/workflows/ecom-profit-engine.yml).
@@ -74,13 +76,15 @@ If this repository is only this project, use the repo root as the Vercel **Root 
 
 ## Shopify API
 
-- Custom app in Shopify Admin → API access token with `read_orders` (and related scopes for orders).
+- **Custom app:** Admin → Develop apps → API access token; scopes e.g. `read_orders`.
+- **Dev Dashboard app:** [Client credentials grant](https://shopify.dev/docs/apps/build/dev-dashboard/get-api-access-tokens) — set `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` (no static `SHOPIFY_TOKEN`). The app must be installed on the shop; tokens last ~24 hours and are refreshed automatically when needed.
 - Pagination uses `Link` / `rel="next"` cursors (250 per page).
 
 ## Meta Marketing API
 
-- System user or app with `ads_read`; long-lived access token.
-- On `401` / OAuth `190`, refresh the token and update `META_TOKEN`.
+- User access token with `ads_read` (Graph API Explorer), or a system user token you manage yourself.
+- **Recommended for cron:** add `META_APP_ID` and `META_APP_SECRET` from **App settings → Basic**. Keep `META_TOKEN` as your user token (even short-lived from Explorer); each run refreshes it to a long-lived token automatically. You still need to re-authorize if Meta revokes access or the user changes password—typically months apart.
+- On `401` / OAuth `190`, update `META_TOKEN` or check app permissions.
 
 ## Tests
 

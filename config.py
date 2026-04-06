@@ -18,9 +18,13 @@ _ROOT = Path(__file__).resolve().parent
 @dataclass(frozen=True)
 class Settings:
     shopify_store: str
-    shopify_token: str
+    shopify_token: str | None
+    shopify_client_id: str | None
+    shopify_client_secret: str | None
     shopify_api_version: str
     meta_token: str
+    meta_app_id: str | None
+    meta_app_secret: str | None
     ad_account_id: str
     meta_api_version: str
     meta_lookback_days: int
@@ -75,11 +79,36 @@ def load_settings() -> Settings:
         google_creds_path = (_ROOT / creds).resolve()
         google_info = None
 
+    shopify_token = os.getenv("SHOPIFY_TOKEN", "").strip() or None
+    shopify_client_id = os.getenv("SHOPIFY_CLIENT_ID", "").strip() or None
+    shopify_client_secret = os.getenv("SHOPIFY_CLIENT_SECRET", "").strip() or None
+
+    if shopify_token and (shopify_client_id or shopify_client_secret):
+        raise RuntimeError(
+            "Set either SHOPIFY_TOKEN (static custom app) or "
+            "SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (Dev Dashboard), not both."
+        )
+    if not shopify_token and not (shopify_client_id and shopify_client_secret):
+        raise RuntimeError(
+            "Shopify: set SHOPIFY_TOKEN or both SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET."
+        )
+
+    meta_app_id = os.getenv("META_APP_ID", "").strip() or None
+    meta_app_secret = os.getenv("META_APP_SECRET", "").strip() or None
+    if meta_app_id and not meta_app_secret:
+        raise RuntimeError("META_APP_SECRET is required when META_APP_ID is set.")
+    if meta_app_secret and not meta_app_id:
+        raise RuntimeError("META_APP_ID is required when META_APP_SECRET is set.")
+
     return Settings(
         shopify_store=_require("SHOPIFY_STORE"),
-        shopify_token=_require("SHOPIFY_TOKEN"),
+        shopify_token=shopify_token,
+        shopify_client_id=shopify_client_id,
+        shopify_client_secret=shopify_client_secret,
         shopify_api_version=os.getenv("SHOPIFY_API_VERSION", "2024-10").strip(),
         meta_token=_require("META_TOKEN"),
+        meta_app_id=meta_app_id,
+        meta_app_secret=meta_app_secret,
         ad_account_id=_require("AD_ACCOUNT_ID"),
         meta_api_version=os.getenv("META_API_VERSION", "v18.0").strip(),
         meta_lookback_days=_optional_int("META_LOOKBACK_DAYS", 90),

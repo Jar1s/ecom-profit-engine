@@ -57,9 +57,9 @@ The workflow passes `GOOGLE_CREDENTIALS_JSON` directly into the process (no file
 
 ### Vercel (cron + serverless)
 
-Deploy this folder as the Vercel project **Root Directory** (or open only `ecom-profit-engine` as the repo root).
+If this repository is only this project, use the repo root as the Vercel **Root Directory** (default). If the app lives inside a monorepo subfolder, set **Root Directory** to `ecom-profit-engine`.
 
-1. **Import** the project in [Vercel](https://vercel.com) and set **Root Directory** to `ecom-profit-engine` if the app lives in a monorepo subfolder.
+1. **Import** the project in [Vercel](https://vercel.com).
 2. **Environment variables** (Production): same as local, plus:
    - `GOOGLE_CREDENTIALS_JSON` — entire service account JSON (one line or multiline in the dashboard).
    - `CRON_SECRET` — random string; Vercel Cron will send `Authorization: Bearer <CRON_SECRET>` to [`/api/cron`](api/cron.py). Without `CRON_SECRET`, the endpoint is open (fine for local tests only).

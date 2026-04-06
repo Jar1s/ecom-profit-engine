@@ -12,9 +12,6 @@ on:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ecom-profit-engine
 
     steps:
       - uses: actions/checkout@v4

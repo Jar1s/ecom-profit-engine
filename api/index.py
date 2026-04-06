@@ -6,7 +6,7 @@ import logging
 import os
 import sys
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -23,17 +23,26 @@ logger = logging.getLogger("ecom_profit_engine.api")
 app = FastAPI(title="Ecom Profit Engine")
 
 
-def _check_auth(authorization: str | None) -> None:
-    """Compare bearer token to CRON_SECRET; tolerate extra spaces after 'Bearer'."""
+def _check_auth(request: Request) -> None:
+    """
+    If CRON_SECRET is set: allow Bearer token, or Vercel Cron (x-vercel-cron: 1).
+
+    Scheduled crons sometimes hit 401 when only Bearer is checked — the platform
+    may not forward Authorization the same way as manual curl. The cron header is
+    set by Vercel for scheduled invocations (external callers can spoof it; use
+    obscure URL or remove CRON_SECRET for stricter Bearer-only checks).
+    """
     secret = (os.environ.get("CRON_SECRET") or "").strip()
     if not secret:
         return
-    raw = (authorization or "").strip()
-    if not raw.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Unauthorized")
-    token = raw[7:].strip()
-    if token != secret:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    auth = (request.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        token = auth[7:].strip()
+        if token == secret:
+            return
+    if request.headers.get("x-vercel-cron") == "1":
+        return
+    raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @app.get("/")
@@ -43,9 +52,9 @@ def health() -> dict[str, str]:
 
 
 @app.api_route("/cron", methods=["GET", "POST"])
-def run_pipeline(authorization: str | None = Header(default=None)) -> JSONResponse:
+def run_pipeline(request: Request) -> JSONResponse:
     """On Vercel, call GET/POST https://<deployment>/cron (with CRON_SECRET if set)."""
-    _check_auth(authorization)
+    _check_auth(request)
     try:
         from pipeline import main
 

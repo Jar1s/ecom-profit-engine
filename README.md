@@ -68,7 +68,7 @@ If this repository is only this project, use the repo root as the Vercel **Root 
 1. **Import** the project in [Vercel](https://vercel.com).
 2. **Environment variables** (Production): same as local, plus:
    - `GOOGLE_CREDENTIALS_JSON` — entire service account JSON (one line or multiline in the dashboard).
-   - `CRON_SECRET` — random string; Vercel Cron will send `Authorization: Bearer <CRON_SECRET>` to `/cron` (implemented in [`api/index.py`](api/index.py) via FastAPI). Without `CRON_SECRET`, the endpoint is open (fine for local tests only).
+   - `CRON_SECRET` — random string; manual calls use `Authorization: Bearer <CRON_SECRET>`. Scheduled Vercel Cron is also allowed via the `x-vercel-cron: 1` header (see [`api/index.py`](api/index.py)). Without `CRON_SECRET`, `/cron` is open.
 3. **Function duration:** we do **not** set `functions` in `vercel.json` — Python/FastAPI builds often don’t match those glob keys and Vercel fails with [unmatched function pattern](https://vercel.link/unmatched-function-pattern). Set **max duration** in the Vercel dashboard: Project → **Settings** → **Functions** (Hobby up to **300s**, Pro up to **800s**). If you hit timeouts, reduce work (e.g. `META_LOOKBACK_DAYS`) or raise the limit there.
 4. After deploy, cron runs automatically. You can also trigger **GET** or **POST** `https://<your-deployment>/cron` with the `Authorization` header when `CRON_SECRET` is set.
 

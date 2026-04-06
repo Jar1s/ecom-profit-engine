@@ -42,42 +42,56 @@ def main() -> int:
         logger.error("%s", exc)
         return 1
 
-    logger.info("Loading supplier costs from %s", settings.supplier_csv_path)
-    cost_map = load_cost_map(settings.supplier_csv_path)
+    phase = "supplier_costs"
+    try:
+        logger.info("Loading supplier costs from %s", settings.supplier_csv_path)
+        cost_map = load_cost_map(settings.supplier_csv_path)
+        logger.info("pipeline_phase=%s_ok keys=%s", phase, len(cost_map))
 
-    logger.info("Fetching Shopify orders …")
-    line_rows = fetch_order_line_rows(settings)
+        phase = "shopify"
+        logger.info("Fetching Shopify orders …")
+        line_rows = fetch_order_line_rows(settings)
+        logger.info("pipeline_phase=%s_ok line_rows=%s", phase, len(line_rows))
 
-    logger.info("Enriching line items with costs …")
-    orders_df = enrich_line_items(line_rows, cost_map)
+        phase = "enrich"
+        logger.info("Enriching line items with costs …")
+        orders_df = enrich_line_items(line_rows, cost_map)
 
-    logger.info("Building order-level summary …")
-    order_df = order_level_summary(orders_df)
+        phase = "order_level"
+        logger.info("Building order-level summary …")
+        order_df = order_level_summary(orders_df)
 
-    logger.info("Building daily summary …")
-    daily_df = daily_summary_from_orders(orders_df)
+        phase = "daily"
+        logger.info("Building daily summary …")
+        daily_df = daily_summary_from_orders(orders_df)
 
-    logger.info("Fetching Meta Ads spend …")
-    meta_rows = fetch_meta_daily_spend(settings)
-    meta_df = pd.DataFrame(meta_rows)
+        phase = "meta"
+        logger.info("Fetching Meta Ads spend …")
+        meta_rows = fetch_meta_daily_spend(settings)
+        meta_df = pd.DataFrame(meta_rows)
 
-    logger.info("Merging daily summary with Meta spend …")
-    daily_final = merge_daily_with_meta(daily_df, meta_rows)
+        phase = "merge_meta"
+        logger.info("Merging daily summary with Meta spend …")
+        daily_final = merge_daily_with_meta(daily_df, meta_rows)
 
-    logger.info("Uploading to Google Sheets %r …", settings.google_sheet_name)
-    upload_dataframe(settings, orders_df, SHEET_ORDERS_DB)
-    upload_dataframe(settings, order_df, SHEET_ORDER_LEVEL)
-    upload_dataframe(settings, meta_df, SHEET_META_DATA)
-    upload_dataframe(settings, daily_final, SHEET_DAILY)
+        phase = "sheets"
+        logger.info("Uploading to Google Sheets %r …", settings.google_sheet_name)
+        upload_dataframe(settings, orders_df, SHEET_ORDERS_DB)
+        upload_dataframe(settings, order_df, SHEET_ORDER_LEVEL)
+        upload_dataframe(settings, meta_df, SHEET_META_DATA)
+        upload_dataframe(settings, daily_final, SHEET_DAILY)
 
-    logger.info(
-        "Done. Line rows=%s, order rows=%s, meta days=%s, daily rows=%s",
-        len(orders_df),
-        len(order_df),
-        len(meta_df),
-        len(daily_final),
-    )
-    return 0
+        logger.info(
+            "Done. Line rows=%s, order rows=%s, meta days=%s, daily rows=%s",
+            len(orders_df),
+            len(order_df),
+            len(meta_df),
+            len(daily_final),
+        )
+        return 0
+    except Exception as exc:
+        logger.exception("pipeline_failed phase=%s", phase)
+        raise RuntimeError(f"[phase={phase}] {exc}") from exc
 
 
 if __name__ == "__main__":

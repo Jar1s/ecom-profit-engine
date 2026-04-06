@@ -65,7 +65,7 @@ If this repository is only this project, use the repo root as the Vercel **Root 
 2. **Environment variables** (Production): same as local, plus:
    - `GOOGLE_CREDENTIALS_JSON` — entire service account JSON (one line or multiline in the dashboard).
    - `CRON_SECRET` — random string; Vercel Cron will send `Authorization: Bearer <CRON_SECRET>` to `/api/cron` (implemented in [`api/cron.py`](api/cron.py) via FastAPI). Without `CRON_SECRET`, the endpoint is open (fine for local tests only).
-3. **`vercel.json`** sets `maxDuration` for `api/cron.py`. On Vercel, **Hobby** allows up to **300s** per function; **Pro** (paid plan) allows up to **800s** if you need longer runs. If you hit `FUNCTION_INVOCATION_TIMEOUT`, raise `maxDuration` within your plan’s cap or reduce work (e.g. `META_LOOKBACK_DAYS`, fewer orders per run).
+3. **Function duration:** we do **not** set `functions` in `vercel.json` — Python/FastAPI builds often don’t match those glob keys and Vercel fails with [unmatched function pattern](https://vercel.link/unmatched-function-pattern). Set **max duration** in the Vercel dashboard: Project → **Settings** → **Functions** (Hobby up to **300s**, Pro up to **800s**). If you hit timeouts, reduce work (e.g. `META_LOOKBACK_DAYS`) or raise the limit there.
 4. After deploy, cron runs automatically. You can also trigger **GET** or **POST** `https://<your-deployment>/api/cron` with the `Authorization` header when `CRON_SECRET` is set.
 
 `supplier_costs.csv` is read from the deployment bundle (commit it or adjust `SUPPLIER_COSTS_CSV` if you change layout).

@@ -31,9 +31,13 @@ def _grid_range(
 def _delete_charts_on_worksheet(ws: gspread.Worksheet) -> None:
     """Remove all charts on this worksheet (pipeline refresh replaces them)."""
     sh = ws.spreadsheet
-    meta = sh.fetch_sheet_metadata(
-        params={"fields": "sheets(properties(sheetId),sheets(charts))"}
-    )
+    # Field mask must use `charts` on Sheet (not `sheets(charts)` — that yields API 400).
+    try:
+        meta = sh.fetch_sheet_metadata(
+            params={"fields": "sheets(properties(sheetId),charts)"}
+        )
+    except gspread.exceptions.APIError:
+        meta = sh.fetch_sheet_metadata()
     targets: list[int] = []
     sid = ws.id
     for sheet in meta.get("sheets", []):

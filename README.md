@@ -14,7 +14,7 @@ Order dates use Shopify `created_at` (ISO UTC). For store-local “business days
 ## Setup
 
 1. Python 3.10+ recommended.
-2. `pip install -r requirements.txt`
+2. `pip install -r requirements.txt` (optional: [`pyproject.toml`](pyproject.toml) declares the Vercel `app` entry via `[project.scripts]`.)
 3. Copy `.env.example` to `.env` and fill secrets.
 4. Google Sheets: either put a service account JSON file on disk (`GOOGLE_CREDS`, default `creds.json`) **or** set `GOOGLE_CREDENTIALS_JSON` to the full JSON string (used on Vercel / CI). Share the spreadsheet with the service account email (Editor).
 5. Put supplier costs in `data/supplier_costs.csv` (`Product`, `Cost` columns). Product names are matched after **trim + case-insensitive** normalization; tune titles in CSV to match Shopify line item names.
@@ -58,6 +58,8 @@ Use a scheduled workflow with repository secrets:
 The workflow passes `GOOGLE_CREDENTIALS_JSON` directly into the process (no file on disk). See [.github/workflows/ecom-profit-engine.yml](.github/workflows/ecom-profit-engine.yml).
 
 ### Vercel (cron + serverless)
+
+The FastAPI app is exported as **`app`** from [`api/index.py`](api/index.py). Vercel also reads **`app = "api.index:app"`** in [`pyproject.toml`](pyproject.toml) under `[project.scripts]` — see [Exporting the FastAPI application](https://vercel.com/docs/frameworks/backend/fastapi#exporting-the-fastapi-application).
 
 If this repository is only this project, use the repo root as the Vercel **Root Directory** (default). If the app lives inside a monorepo subfolder, set **Root Directory** to `ecom-profit-engine`.
 

@@ -33,12 +33,13 @@ def _check_auth(authorization: str | None) -> None:
 
 @app.get("/")
 def health() -> dict[str, str]:
-    return {"service": "ecom-profit-engine", "pipeline": "/api/cron"}
+    # On Vercel, routes are at domain root (this file is api/index.py but "/" is the app root).
+    return {"service": "ecom-profit-engine", "pipeline": "/cron"}
 
 
 @app.api_route("/cron", methods=["GET", "POST"])
 def run_pipeline(authorization: str | None = Header(default=None)) -> JSONResponse:
-    """Served at https://<host>/api/cron when this app is mounted under /api."""
+    """On Vercel, call GET/POST https://<deployment>/cron (with CRON_SECRET if set)."""
     _check_auth(authorization)
     try:
         from pipeline import main

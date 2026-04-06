@@ -48,6 +48,9 @@ class Settings:
     supplier_csv_path: Path
     http_max_retries: int
     http_backoff_base_seconds: float
+    report_currency: str
+    usd_per_local: float | None
+    sheets_fancy_layout: bool
 
 
 def _require(name: str) -> str:
@@ -69,6 +72,15 @@ def _optional_float(name: str, default: float) -> float:
     if raw is None or raw.strip() == "":
         return default
     return float(raw)
+
+
+def _optional_positive_float_or_none(name: str) -> float | None:
+    """Unset or non-positive → None (e.g. USD_PER_LOCAL_UNIT for FX)."""
+    raw = os.getenv(name)
+    if raw is None or not str(raw).strip():
+        return None
+    v = float(str(raw).strip())
+    return v if v > 0 else None
 
 
 def _strip_wrapped_quotes(raw: str) -> str:
@@ -180,4 +192,7 @@ def load_settings() -> Settings:
         supplier_csv_path=(_ROOT / csv_rel).resolve(),
         http_max_retries=max(1, _optional_int("HTTP_MAX_RETRIES", 5)),
         http_backoff_base_seconds=max(0.1, _optional_float("HTTP_BACKOFF_BASE_SECONDS", 1.5)),
+        report_currency=os.getenv("REPORT_CURRENCY", "EUR").strip(),
+        usd_per_local=_optional_positive_float_or_none("USD_PER_LOCAL_UNIT"),
+        sheets_fancy_layout=_env_bool("SHEETS_FANCY_LAYOUT", True),
     )

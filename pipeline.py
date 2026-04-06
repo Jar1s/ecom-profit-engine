@@ -16,6 +16,7 @@ from sheets import upload_dataframe
 from transform import (
     daily_summary_from_orders,
     enrich_line_items,
+    enrich_usd_columns,
     merge_daily_with_meta,
     order_level_summary,
 )
@@ -55,11 +56,17 @@ def main() -> int:
 
         phase = "enrich"
         logger.info("Enriching line items with costs …")
-        orders_df = enrich_line_items(line_rows, cost_map)
+        orders_df = enrich_usd_columns(
+            enrich_line_items(line_rows, cost_map),
+            settings.usd_per_local,
+        )
 
         phase = "order_level"
         logger.info("Building order-level summary …")
-        order_df = order_level_summary(orders_df)
+        order_df = enrich_usd_columns(
+            order_level_summary(orders_df),
+            settings.usd_per_local,
+        )
 
         phase = "daily"
         logger.info("Building daily summary …")
@@ -68,19 +75,25 @@ def main() -> int:
         phase = "meta"
         logger.info("Fetching Meta Ads spend …")
         meta_rows = fetch_meta_daily_spend(settings)
-        meta_df = pd.DataFrame(meta_rows)
+        meta_df = enrich_usd_columns(
+            pd.DataFrame(meta_rows),
+            settings.usd_per_local,
+        )
 
         phase = "merge_meta"
         logger.info("Merging daily summary with Meta spend …")
-        daily_final = merge_daily_with_meta(daily_df, meta_rows)
+        daily_final = enrich_usd_columns(
+            merge_daily_with_meta(daily_df, meta_rows),
+            settings.usd_per_local,
+        )
 
         phase = "sheets"
         _sheet_target = settings.google_sheet_id or settings.google_sheet_name
         logger.info("Uploading to Google Sheets %r …", _sheet_target)
-        upload_dataframe(settings, orders_df, SHEET_ORDERS_DB)
-        upload_dataframe(settings, order_df, SHEET_ORDER_LEVEL)
-        upload_dataframe(settings, meta_df, SHEET_META_DATA)
-        upload_dataframe(settings, daily_final, SHEET_DAILY)
+        upload_dataframe(settings, orders_df, SHEET_ORDERS_DB, layout_kind="orders")
+        upload_dataframe(settings, order_df, SHEET_ORDER_LEVEL, layout_kind="order_level")
+        upload_dataframe(settings, meta_df, SHEET_META_DATA, layout_kind="meta")
+        upload_dataframe(settings, daily_final, SHEET_DAILY, layout_kind="daily")
 
         logger.info(
             "Done. Line rows=%s, order rows=%s, meta days=%s, daily rows=%s",

@@ -108,3 +108,25 @@ def merge_daily_with_meta(daily: pd.DataFrame, meta_rows: list[dict[str, Any]]) 
 
     merged["Marketing_ROAS"] = merged.apply(roas, axis=1)
     return merged
+
+
+def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.DataFrame:
+    """
+    Append *_USD columns by multiplying local currency columns by USD_PER_LOCAL_UNIT
+    (how many USD for one unit of shop/report currency, e.g. 1.08 for EUR→USD).
+    """
+    if not usd_per_local or usd_per_local <= 0:
+        return df
+    out = df.copy()
+    pairs = [
+        ("Revenue", "Revenue_USD"),
+        ("Product_Cost", "Product_Cost_USD"),
+        ("Gross_Profit", "Gross_Profit_USD"),
+        ("Ad_Spend", "Ad_Spend_USD"),
+    ]
+    for src, dst in pairs:
+        if src not in out.columns:
+            continue
+        s = pd.to_numeric(out[src], errors="coerce").fillna(0.0)
+        out[dst] = (s * float(usd_per_local)).round(2)
+    return out

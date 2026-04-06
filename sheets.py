@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import gspread
 import pandas as pd
@@ -90,14 +89,53 @@ def dataframe_to_values(df: pd.DataFrame) -> list[list[object]]:
     return [header] + rows
 
 
+def _apply_sheet_style(ws: gspread.Worksheet, header_row: int, num_cols: int) -> None:
+    """Bold header row, light tint above, freeze through header."""
+    try:
+        end = rowcol_to_a1(header_row, num_cols)
+        ws.format(
+            f"A{header_row}:{end}",
+            {
+                "textFormat": {"bold": True},
+                "backgroundColor": {"red": 0.82, "green": 0.91, "blue": 0.98},
+            },
+        )
+        if header_row > 1:
+            top_end = rowcol_to_a1(header_row - 1, num_cols)
+            ws.format(
+                f"A1:{top_end}",
+                {"backgroundColor": {"red": 0.96, "green": 0.98, "blue": 1.0}},
+            )
+        ws.spreadsheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateSheetProperties": {
+                            "properties": {
+                                "sheetId": ws.id,
+                                "gridProperties": {"frozenRowCount": header_row},
+                            },
+                            "fields": "gridProperties.frozenRowCount",
+                        }
+                    }
+                ]
+            }
+        )
+    except Exception as exc:
+        logger.warning("Sheet styling skipped: %s", exc)
+
+
 def upload_dataframe(
     settings: Settings,
     df: pd.DataFrame,
     worksheet_title: str,
     *,
+    layout_kind: str | None = None,
     row_chunk: int = _DEFAULT_ROW_CHUNK,
 ) -> None:
-    """Clear worksheet and write dataframe (batch by row chunks)."""
+    """Clear worksheet and write dataframe. Optional summary block + styling."""
+    from sheets_layout import sheet_values_plain, sheet_values_with_summary
+
     client = _authorize(settings)
     sh = _open_spreadsheet(client, settings)
     logger.info(
@@ -110,16 +148,20 @@ def upload_dataframe(
     try:
         ws = sh.worksheet(worksheet_title)
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=worksheet_title, rows=1000, cols=50)
+        ws = sh.add_worksheet(title=worksheet_title, rows=3000, cols=40)
         logger.info("Created worksheet %r", worksheet_title)
 
-    values = dataframe_to_values(df)
+    if settings.sheets_fancy_layout and layout_kind is not None:
+        values, header_row = sheet_values_with_summary(df, kind=layout_kind, settings=settings)
+    else:
+        values, header_row = sheet_values_plain(df)
+
     if not values:
         ws.clear()
-        logger.info("Sheet %r: empty dataframe — cleared", worksheet_title)
+        logger.info("Sheet %r: empty — cleared", worksheet_title)
         return
 
-    num_cols = len(values[0])
+    num_cols = max(len(r) for r in values)
     ws.clear()
 
     for start in range(0, len(values), row_chunk):
@@ -131,4 +173,12 @@ def upload_dataframe(
         ws.update(chunk, range_a1, value_input_option="USER_ENTERED")
         logger.debug("Sheet %r: wrote rows %s-%s", worksheet_title, start_row, end_row)
 
-    logger.info("Sheet %r: uploaded %s rows (+ header)", worksheet_title, len(values) - 1)
+    if settings.sheets_fancy_layout and layout_kind is not None:
+        _apply_sheet_style(ws, header_row, num_cols)
+
+    logger.info(
+        "Sheet %r: uploaded %s cell rows (header row=%s)",
+        worksheet_title,
+        len(values),
+        header_row,
+    )

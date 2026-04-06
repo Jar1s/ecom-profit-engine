@@ -12,7 +12,11 @@ from gspread.utils import rowcol_to_a1
 from config import Settings
 
 from sheets_charts import apply_daily_summary_charts
-from sheets_formatting import apply_data_column_widths, apply_summary_dashboard_format
+from sheets_formatting import (
+    apply_center_alignment,
+    apply_data_column_widths,
+    apply_summary_dashboard_format,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +111,8 @@ def _apply_sheet_style(
             {
                 "textFormat": {"bold": True},
                 "backgroundColor": {"red": 0.82, "green": 0.91, "blue": 0.98},
+                "horizontalAlignment": "CENTER",
+                "verticalAlignment": "MIDDLE",
             },
         )
         if header_row > 1 and not fancy_summary:
@@ -188,6 +194,8 @@ def upload_dataframe(
         apply_data_column_widths(ws, num_cols)
         if layout_kind == "daily":
             apply_daily_summary_charts(ws, header_row_1based=header_row, df=df)
+
+    apply_center_alignment(ws, num_rows=len(values), num_cols=num_cols)
 
     logger.info(
         "Sheet %r: uploaded %s cell rows (header row=%s)",

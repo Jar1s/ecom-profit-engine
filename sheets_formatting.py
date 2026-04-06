@@ -105,12 +105,16 @@ def apply_summary_dashboard_format(
                     "cell": {
                         "userEnteredFormat": {
                             "backgroundColor": _SUMMARY_BG,
+                            "horizontalAlignment": "CENTER",
                             "verticalAlignment": "MIDDLE",
                             "wrapStrategy": "WRAP",
                             "textFormat": {"fontSize": 10},
                         }
                     },
-                    "fields": "userEnteredFormat(backgroundColor,textFormat,verticalAlignment,wrapStrategy)",
+                    "fields": (
+                        "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,"
+                        "verticalAlignment,wrapStrategy)"
+                    ),
                 }
             }
         )
@@ -150,6 +154,44 @@ def apply_summary_dashboard_format(
         ws.spreadsheet.batch_update({"requests": requests})
     except Exception as exc:
         logger.warning("Dashboard formatting partially failed: %s", exc)
+
+
+def apply_center_alignment(
+    ws: gspread.Worksheet,
+    *,
+    num_rows: int,
+    num_cols: int,
+) -> None:
+    """Center text in all uploaded cells (only alignment fields — keeps fills from dashboard format)."""
+    if num_rows < 1 or num_cols < 1:
+        return
+    try:
+        ws.spreadsheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "repeatCell": {
+                            "range": {
+                                "sheetId": ws.id,
+                                "startRowIndex": 0,
+                                "endRowIndex": num_rows,
+                                "startColumnIndex": 0,
+                                "endColumnIndex": num_cols,
+                            },
+                            "cell": {
+                                "userEnteredFormat": {
+                                    "horizontalAlignment": "CENTER",
+                                    "verticalAlignment": "MIDDLE",
+                                }
+                            },
+                            "fields": "userEnteredFormat(horizontalAlignment,verticalAlignment)",
+                        }
+                    }
+                ]
+            }
+        )
+    except Exception as exc:
+        logger.warning("Center alignment skipped: %s", exc)
 
 
 def apply_data_column_widths(ws: gspread.Worksheet, num_cols: int, min_width: int = 112) -> None:

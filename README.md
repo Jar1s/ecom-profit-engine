@@ -31,8 +31,10 @@ Optional worksheet names: `SHEET_TAB_ORDERS_DB`, `SHEET_TAB_ORDER_LEVEL`, `SHEET
 
 ```bash
 cd ecom-profit-engine
-python main.py
+python pipeline.py
 ```
+
+(Do **not** add a root `main.py` — Vercel reserves that name as a Python web entrypoint and your `api/*.py` routes may not deploy as Serverless Functions.)
 
 Exit code `0` on success, `1` on configuration or fatal errors.
 
@@ -43,7 +45,7 @@ Exit code `0` on success, `1` on configuration or fatal errors.
 Run every 2 hours (adjust path):
 
 ```cron
-0 */2 * * * cd /path/to/ecom-profit-engine && /usr/bin/python3 main.py >> /var/log/ecom-profit.log 2>&1
+0 */2 * * * cd /path/to/ecom-profit-engine && /usr/bin/python3 pipeline.py >> /var/log/ecom-profit.log 2>&1
 ```
 
 ### GitHub Actions

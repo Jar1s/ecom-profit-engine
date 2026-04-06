@@ -40,7 +40,7 @@ class handler(BaseHTTPRequestHandler):
             return
 
         try:
-            from main import main
+            from pipeline import main
 
             code = main()
             body = json.dumps({"ok": code == 0, "exitCode": code}).encode("utf-8")

@@ -24,10 +24,15 @@ app = FastAPI(title="Ecom Profit Engine")
 
 
 def _check_auth(authorization: str | None) -> None:
-    secret = os.environ.get("CRON_SECRET", "").strip()
+    """Compare bearer token to CRON_SECRET; tolerate extra spaces after 'Bearer'."""
+    secret = (os.environ.get("CRON_SECRET") or "").strip()
     if not secret:
         return
-    if (authorization or "").strip() != f"Bearer {secret}":
+    raw = (authorization or "").strip()
+    if not raw.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    token = raw[7:].strip()
+    if token != secret:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

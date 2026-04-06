@@ -79,11 +79,11 @@ def sheet_values_with_summary(
                 [
                     "Súčty",
                     f"Počet riadkov: {n}",
-                    "Σ Revenue",
+                    "Revenue",
                     round(rev, 2),
-                    "Σ Product_Cost",
+                    "Product_Cost",
                     round(cogs, 2),
-                    "Σ Gross_Profit",
+                    "Gross_Profit",
                     round(gp, 2),
                 ],
             )
@@ -95,11 +95,11 @@ def sheet_values_with_summary(
                     [
                         "Súčty USD",
                         "",
-                        "Σ Revenue_USD",
+                        "Revenue_USD",
                         round(float(df["Revenue_USD"].sum()), 2),
-                        "Σ Product_Cost_USD",
+                        "Product_Cost_USD",
                         round(float(df["Product_Cost_USD"].sum()), 2),
-                        "Σ Gross_Profit_USD",
+                        "Gross_Profit_USD",
                         round(float(df["Gross_Profit_USD"].sum()), 2),
                     ],
                 )
@@ -139,11 +139,11 @@ def sheet_values_with_summary(
                 [
                     "Súčty",
                     f"Objednávok: {n}",
-                    "Σ Revenue",
+                    "Revenue",
                     round(rev, 2),
-                    "Σ Product_Cost",
+                    "Product_Cost",
                     round(cogs, 2),
-                    "Σ Gross_Profit",
+                    "Gross_Profit",
                     round(gp, 2),
                 ],
             )
@@ -155,11 +155,11 @@ def sheet_values_with_summary(
                     [
                         "Súčty USD",
                         "",
-                        "Σ Revenue_USD",
+                        "Revenue_USD",
                         round(float(df["Revenue_USD"].sum()), 2),
-                        "Σ Product_Cost_USD",
+                        "Product_Cost_USD",
                         round(float(df["Product_Cost_USD"].sum()), 2),
-                        "Σ Gross_Profit_USD",
+                        "Gross_Profit_USD",
                         round(float(df["Gross_Profit_USD"].sum()), 2),
                     ],
                 )
@@ -183,7 +183,7 @@ def sheet_values_with_summary(
                 [
                     "Súčty",
                     f"Dní v tabuľke: {n}",
-                    "Σ Ad_Spend",
+                    "Ad_Spend",
                     round(spend, 2),
                     "",
                     "",
@@ -197,7 +197,7 @@ def sheet_values_with_summary(
                 _pad(
                     width,
                     [
-                        "Σ Ad_Spend USD",
+                        "Ad_Spend USD",
                         round(float(df["Ad_Spend_USD"].sum()), 2),
                         "",
                         "",
@@ -229,11 +229,11 @@ def sheet_values_with_summary(
                 [
                     "Súčty",
                     f"Riadkov: {n}",
-                    "Σ Ad_Spend",
+                    "Ad_Spend",
                     round(spend, 2),
-                    "Σ Purchases",
+                    "Purchases",
                     round(pur, 2),
-                    "Σ Purchase_Value",
+                    "Purchase_Value",
                     round(pv, 2),
                     "",
                 ],
@@ -249,9 +249,9 @@ def sheet_values_with_summary(
                 _pad(
                     width,
                     [
-                        "Σ Ad_Spend USD",
+                        "Ad_Spend USD",
                         round(float(df["Ad_Spend_USD"].sum()), 2),
-                        "Σ Purchase_Value USD",
+                        "Purchase_Value USD",
                         round(pv_usd, 2),
                         "",
                         "",
@@ -285,11 +285,11 @@ def sheet_values_with_summary(
                 [
                     "Súčty (všetky dni)",
                     f"Dní: {n}",
-                    "Σ Revenue",
+                    "Revenue",
                     round(rev, 2),
-                    "Σ Product_Cost",
+                    "Product_Cost",
                     round(cogs, 2),
-                    "Σ Gross_Profit",
+                    "Gross_Profit",
                     round(gp, 2),
                 ],
             )
@@ -302,15 +302,15 @@ def sheet_values_with_summary(
                 _pad(
                     width,
                     [
-                        "Σ Meta Ad_Spend",
+                        "Meta Ad_Spend",
                         round(ads, 2),
-                        "Σ Revenue_USD",
+                        "Revenue_USD",
                         round(float(df["Revenue_USD"].sum()), 2),
-                        "Σ Product_Cost_USD",
+                        "Product_Cost_USD",
                         round(float(df["Product_Cost_USD"].sum()), 2),
-                        "Σ Gross_Profit_USD",
+                        "Gross_Profit_USD",
                         round(float(df["Gross_Profit_USD"].sum()), 2),
-                        "Σ Ad_Spend USD",
+                        "Ad_Spend USD",
                         round(ad_usd, 2),
                     ],
                 )
@@ -320,7 +320,7 @@ def sheet_values_with_summary(
                 _pad(
                     width,
                     [
-                        "Σ Meta Ad_Spend",
+                        "Meta Ad_Spend",
                         round(ads, 2),
                         "",
                         "",

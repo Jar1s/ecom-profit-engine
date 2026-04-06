@@ -11,6 +11,9 @@ from gspread.utils import rowcol_to_a1
 
 from config import Settings
 
+from sheets_charts import apply_daily_summary_charts
+from sheets_formatting import apply_data_column_widths, apply_summary_dashboard_format
+
 logger = logging.getLogger(__name__)
 
 _SCOPES_SHEETS_ONLY = ("https://www.googleapis.com/auth/spreadsheets",)
@@ -89,8 +92,14 @@ def dataframe_to_values(df: pd.DataFrame) -> list[list[object]]:
     return [header] + rows
 
 
-def _apply_sheet_style(ws: gspread.Worksheet, header_row: int, num_cols: int) -> None:
-    """Bold header row, light tint above, freeze through header."""
+def _apply_sheet_style(
+    ws: gspread.Worksheet,
+    header_row: int,
+    num_cols: int,
+    *,
+    fancy_summary: bool = False,
+) -> None:
+    """Bold header row, optional light tint above (plain layout), freeze through header."""
     try:
         end = rowcol_to_a1(header_row, num_cols)
         ws.format(
@@ -100,7 +109,7 @@ def _apply_sheet_style(ws: gspread.Worksheet, header_row: int, num_cols: int) ->
                 "backgroundColor": {"red": 0.82, "green": 0.91, "blue": 0.98},
             },
         )
-        if header_row > 1:
+        if header_row > 1 and not fancy_summary:
             top_end = rowcol_to_a1(header_row - 1, num_cols)
             ws.format(
                 f"A1:{top_end}",
@@ -174,7 +183,11 @@ def upload_dataframe(
         logger.debug("Sheet %r: wrote rows %s-%s", worksheet_title, start_row, end_row)
 
     if settings.sheets_fancy_layout and layout_kind is not None:
-        _apply_sheet_style(ws, header_row, num_cols)
+        apply_summary_dashboard_format(ws, header_row_1based=header_row, num_cols=num_cols)
+        _apply_sheet_style(ws, header_row, num_cols, fancy_summary=True)
+        apply_data_column_widths(ws, num_cols)
+        if layout_kind == "daily":
+            apply_daily_summary_charts(ws, header_row_1based=header_row, df=df)
 
     logger.info(
         "Sheet %r: uploaded %s cell rows (header row=%s)",

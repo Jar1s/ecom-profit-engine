@@ -10,7 +10,7 @@ import pandas as pd
 
 from config import load_settings
 from costs import load_cost_map
-from meta_ads import fetch_meta_daily_spend
+from meta_ads import fetch_meta_campaign_insights, fetch_meta_daily_spend
 from shopify_client import fetch_order_line_rows
 from sheets import upload_dataframe
 from transform import (
@@ -33,7 +33,19 @@ logger = logging.getLogger("ecom_profit_engine")
 SHEET_ORDERS_DB = os.getenv("SHEET_TAB_ORDERS_DB", "ORDERS_DB").strip()
 SHEET_ORDER_LEVEL = os.getenv("SHEET_TAB_ORDER_LEVEL", "ORDER_LEVEL").strip()
 SHEET_META_DATA = os.getenv("SHEET_TAB_META_DATA", "META_DATA").strip()
+SHEET_META_CAMPAIGNS = os.getenv("SHEET_TAB_META_CAMPAIGNS", "META_CAMPAIGNS").strip()
 SHEET_DAILY = os.getenv("SHEET_TAB_DAILY_SUMMARY", "DAILY_SUMMARY").strip()
+
+_META_CAMPAIGN_COLUMNS = [
+    "Date",
+    "Campaign_ID",
+    "Campaign_Name",
+    "Ad_Spend",
+    "Impressions",
+    "Clicks",
+    "Purchases",
+    "Purchase_Value",
+]
 
 
 def main() -> int:
@@ -80,6 +92,16 @@ def main() -> int:
             settings.usd_per_local,
         )
 
+        meta_campaign_df = pd.DataFrame()
+        if settings.meta_campaign_insights:
+            phase = "meta_campaigns"
+            logger.info("Fetching Meta campaign insights (spend + conversions) …")
+            _mc_raw = fetch_meta_campaign_insights(settings)
+            meta_campaign_df = enrich_usd_columns(
+                pd.DataFrame(_mc_raw) if _mc_raw else pd.DataFrame(columns=_META_CAMPAIGN_COLUMNS),
+                settings.usd_per_local,
+            )
+
         phase = "merge_meta"
         logger.info("Merging daily summary with Meta spend …")
         daily_final = enrich_usd_columns(
@@ -93,13 +115,21 @@ def main() -> int:
         upload_dataframe(settings, orders_df, SHEET_ORDERS_DB, layout_kind="orders")
         upload_dataframe(settings, order_df, SHEET_ORDER_LEVEL, layout_kind="order_level")
         upload_dataframe(settings, meta_df, SHEET_META_DATA, layout_kind="meta")
+        if settings.meta_campaign_insights:
+            upload_dataframe(
+                settings,
+                meta_campaign_df,
+                SHEET_META_CAMPAIGNS,
+                layout_kind="meta_campaigns",
+            )
         upload_dataframe(settings, daily_final, SHEET_DAILY, layout_kind="daily")
 
         logger.info(
-            "Done. Line rows=%s, order rows=%s, meta days=%s, daily rows=%s",
+            "Done. Line rows=%s, order rows=%s, meta days=%s, campaign rows=%s, daily rows=%s",
             len(orders_df),
             len(order_df),
             len(meta_df),
+            len(meta_campaign_df),
             len(daily_final),
         )
         return 0

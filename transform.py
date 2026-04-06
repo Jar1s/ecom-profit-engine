@@ -123,6 +123,7 @@ def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.Data
         ("Product_Cost", "Product_Cost_USD"),
         ("Gross_Profit", "Gross_Profit_USD"),
         ("Ad_Spend", "Ad_Spend_USD"),
+        ("Purchase_Value", "Purchase_Value_USD"),
     ]
     for src, dst in pairs:
         if src not in out.columns:

@@ -8,7 +8,7 @@ import pandas as pd
 
 from config import Settings
 
-SheetKind = Literal["orders", "order_level", "meta", "daily"]
+SheetKind = Literal["orders", "order_level", "meta", "meta_campaigns", "daily"]
 
 
 def _pad(width: int, row: list[Any]) -> list[Any]:
@@ -200,6 +200,59 @@ def sheet_values_with_summary(
                         "Σ Ad_Spend USD",
                         round(float(df["Ad_Spend_USD"].sum()), 2),
                         "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                    ],
+                )
+            )
+        else:
+            summary.append(_pad(width, [""]))
+
+    elif kind == "meta_campaigns":
+        title = "📊 Meta — kampane × deň (spend + konverzie)"
+        n = len(df)
+        spend = float(df["Ad_Spend"].sum()) if "Ad_Spend" in df.columns else 0.0
+        pur = float(df["Purchases"].sum()) if "Purchases" in df.columns else 0.0
+        pv = float(df["Purchase_Value"].sum()) if "Purchase_Value" in df.columns else 0.0
+        summary.append(
+            _pad(
+                width,
+                [title, f"Mena účtu: {cur}", f"USD/1: {rate_s}", "", "", "", "", ""],
+            )
+        )
+        summary.append(
+            _pad(
+                width,
+                [
+                    "Súčty",
+                    f"Riadkov: {n}",
+                    "Σ Ad_Spend",
+                    round(spend, 2),
+                    "Σ Purchases",
+                    round(pur, 2),
+                    "Σ Purchase_Value",
+                    round(pv, 2),
+                    "",
+                ],
+            )
+        )
+        if rate and "Ad_Spend_USD" in df.columns:
+            pv_usd = (
+                float(df["Purchase_Value_USD"].sum())
+                if "Purchase_Value_USD" in df.columns
+                else 0.0
+            )
+            summary.append(
+                _pad(
+                    width,
+                    [
+                        "Σ Ad_Spend USD",
+                        round(float(df["Ad_Spend_USD"].sum()), 2),
+                        "Σ Purchase_Value USD",
+                        round(pv_usd, 2),
                         "",
                         "",
                         "",

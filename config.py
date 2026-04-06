@@ -41,6 +41,7 @@ class Settings:
     meta_lookback_days: int
     meta_time_range_since: str | None
     meta_time_range_until: str | None
+    meta_campaign_insights: bool
     google_sheet_id: str | None
     google_sheet_name: str | None
     google_creds_path: Path | None
@@ -185,6 +186,7 @@ def load_settings() -> Settings:
         meta_lookback_days=_optional_int("META_LOOKBACK_DAYS", 90),
         meta_time_range_since=os.getenv("META_TIME_RANGE_SINCE", "").strip() or None,
         meta_time_range_until=os.getenv("META_TIME_RANGE_UNTIL", "").strip() or None,
+        meta_campaign_insights=_env_bool("META_CAMPAIGN_INSIGHTS", True),
         google_sheet_id=google_sheet_id,
         google_sheet_name=google_sheet_name,
         google_creds_path=google_creds_path,

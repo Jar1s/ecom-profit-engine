@@ -7,7 +7,7 @@
     }
   ],
   "functions": {
-    "app.py": {
+    "api/cron.py": {
       "maxDuration": 300
     }
   }

@@ -1,4 +1,4 @@
-"""Vercel / FastAPI entry: GET/POST /api/cron runs the pipeline (replaces api/cron.py handler)."""
+"""Vercel Serverless: this file maps to URL /api/cron. FastAPI routes use path / inside the function."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import sys
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 
-_ROOT = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
@@ -31,12 +31,7 @@ def _check_auth(authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-@app.get("/")
-def health() -> dict[str, str]:
-    return {"service": "ecom-profit-engine", "cron": "/api/cron"}
-
-
-@app.api_route("/api/cron", methods=["GET", "POST"])
+@app.api_route("/", methods=["GET", "POST"])
 def run_pipeline(authorization: str | None = Header(default=None)) -> JSONResponse:
     _check_auth(authorization)
     try:

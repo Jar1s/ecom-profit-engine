@@ -34,7 +34,7 @@ cd ecom-profit-engine
 python pipeline.py
 ```
 
-(Do **not** add a root `main.py` — Vercel reserves that name. The HTTP entry for deploys is [`app.py`](app.py) (FastAPI); the pipeline CLI stays in [`pipeline.py`](pipeline.py).)
+(Do **not** add a root `main.py` — Vercel reserves that name. The HTTP entry for deploys is [`api/cron.py`](api/cron.py) (FastAPI, URL `/api/cron`); the pipeline CLI stays in [`pipeline.py`](pipeline.py).)
 
 Exit code `0` on success, `1` on configuration or fatal errors.
 
@@ -64,8 +64,8 @@ If this repository is only this project, use the repo root as the Vercel **Root 
 1. **Import** the project in [Vercel](https://vercel.com).
 2. **Environment variables** (Production): same as local, plus:
    - `GOOGLE_CREDENTIALS_JSON` — entire service account JSON (one line or multiline in the dashboard).
-   - `CRON_SECRET` — random string; Vercel Cron will send `Authorization: Bearer <CRON_SECRET>` to `/api/cron` (implemented in [`app.py`](app.py) via FastAPI). Without `CRON_SECRET`, the endpoint is open (fine for local tests only).
-3. **`vercel.json`** sets `maxDuration` for `app.py` (the single Python Serverless Function). On Vercel, **Hobby** allows up to **300s** per function; **Pro** (paid plan) allows up to **800s** if you need longer runs. If you hit `FUNCTION_INVOCATION_TIMEOUT`, raise `maxDuration` within your plan’s cap or reduce work (e.g. `META_LOOKBACK_DAYS`, fewer orders per run).
+   - `CRON_SECRET` — random string; Vercel Cron will send `Authorization: Bearer <CRON_SECRET>` to `/api/cron` (implemented in [`api/cron.py`](api/cron.py) via FastAPI). Without `CRON_SECRET`, the endpoint is open (fine for local tests only).
+3. **`vercel.json`** sets `maxDuration` for `api/cron.py`. On Vercel, **Hobby** allows up to **300s** per function; **Pro** (paid plan) allows up to **800s** if you need longer runs. If you hit `FUNCTION_INVOCATION_TIMEOUT`, raise `maxDuration` within your plan’s cap or reduce work (e.g. `META_LOOKBACK_DAYS`, fewer orders per run).
 4. After deploy, cron runs automatically. You can also trigger **GET** or **POST** `https://<your-deployment>/api/cron` with the `Authorization` header when `CRON_SECRET` is set.
 
 `supplier_costs.csv` is read from the deployment bundle (commit it or adjust `SUPPLIER_COSTS_CSV` if you change layout).

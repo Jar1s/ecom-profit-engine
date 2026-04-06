@@ -23,8 +23,11 @@ def get_meta_access_token(settings: Settings) -> str:
     If app id/secret are omitted, or META_FB_EXCHANGE is 0/false, META_TOKEN is
     used as-is (use a long-lived token from Business Manager / Graph Explorer).
 
-    Exchange requires META_TOKEN to still be valid; if it expired (error 190),
-    generate a new user token with ads_read and update META_TOKEN.
+    If the exchange endpoint keeps returning HTTP 429/500 after retries, the pipeline
+    falls back to META_TOKEN as-is (with a warning) so Meta outages do not block the run.
+
+    Exchange requires META_TOKEN to still be valid when exchange is used or after fallback;
+    if it expired (error 190 on Graph), generate a new user token with ads_read.
     """
     use_exchange = (
         bool(settings.meta_app_id)
@@ -81,7 +84,14 @@ def _exchange_token(settings: Settings) -> str:
         r = requests.get(url, params=params, timeout=60)
         if r.status_code == 429 or r.status_code >= 500:
             if attempt + 1 >= settings.http_max_retries:
-                raise _exchange_error_message(r)
+                logger.warning(
+                    "Meta token exchange still HTTP %s after %s attempts — using META_TOKEN "
+                    "without long-lived exchange (Graph may still work if token is valid). "
+                    "To skip exchange permanently set META_FB_EXCHANGE=0.",
+                    r.status_code,
+                    settings.http_max_retries,
+                )
+                return settings.meta_token
             logger.warning(
                 "Meta token exchange HTTP %s (attempt %s/%s), retrying after backoff…",
                 r.status_code,

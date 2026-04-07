@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Any
 
 import gspread
+
+if TYPE_CHECKING:
+    from config import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +196,137 @@ def apply_center_alignment(
         )
     except Exception as exc:
         logger.warning("Center alignment skipped: %s", exc)
+
+
+def clear_worksheet_conditional_format_rules(ws: gspread.Worksheet) -> None:
+    """Remove all conditional formatting rules on this tab (pipeline overwrites data each run)."""
+    try:
+        meta = ws.spreadsheet.fetch_sheet_metadata(
+            params={"fields": "sheets(properties(sheetId),conditionalFormatRules)"}
+        )
+        for sheet in meta.get("sheets", []):
+            if sheet.get("properties", {}).get("sheetId") != ws.id:
+                continue
+            rules = sheet.get("conditionalFormatRules") or []
+            if not rules:
+                return
+            requests = [
+                {"deleteConditionalFormatRule": {"sheetId": ws.id, "index": i}}
+                for i in range(len(rules) - 1, -1, -1)
+            ]
+            ws.spreadsheet.batch_update({"requests": requests})
+            return
+    except Exception as exc:
+        logger.warning("Could not clear conditional format rules: %s", exc)
+
+
+def _col_index(columns: list[str], name: str) -> int | None:
+    try:
+        return list(columns).index(name)
+    except ValueError:
+        return None
+
+
+def _grid(
+    sheet_id: int,
+    *,
+    r0: int,
+    r1: int,
+    c0: int,
+    c1: int,
+) -> dict[str, Any]:
+    return {
+        "sheetId": sheet_id,
+        "startRowIndex": r0,
+        "endRowIndex": r1,
+        "startColumnIndex": c0,
+        "endColumnIndex": c1,
+    }
+
+
+_NEG_PROFIT_BG = {"red": 0.96, "green": 0.78, "blue": 0.78}
+_ROAS_WARN_BG = {"red": 1.0, "green": 0.94, "blue": 0.75}
+
+
+def apply_data_conditional_formatting(
+    ws: gspread.Worksheet,
+    *,
+    settings: "Settings",
+    header_row_1based: int,
+    num_sheet_rows: int,
+    columns: list[str],
+    layout_kind: str | None,
+) -> None:
+    """
+    Data rows only: Gross_Profit < 0 → light red; Marketing_ROAS < threshold → light yellow (daily).
+    """
+    if not settings.sheets_conditional_format:
+        return
+    if not columns or header_row_1based >= num_sheet_rows:
+        return
+
+    sheet_id = ws.id
+    # First data row 0-based; end exclusive
+    d0 = header_row_1based
+    d1 = num_sheet_rows
+    if d0 >= d1:
+        return
+
+    clear_worksheet_conditional_format_rules(ws)
+    requests: list[dict[str, Any]] = []
+
+    gp = _col_index(columns, "Gross_Profit")
+    if gp is not None and layout_kind in ("orders", "order_level", "daily"):
+        requests.append(
+            {
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [_grid(sheet_id, r0=d0, r1=d1, c0=gp, c1=gp + 1)],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "NUMBER_LESS",
+                                "values": [{"userEnteredValue": "0"}],
+                            },
+                            "format": {"backgroundColor": _NEG_PROFIT_BG},
+                        },
+                    },
+                    "index": 0,
+                }
+            }
+        )
+
+    thr = settings.sheets_roas_warn_below
+    roas_i = _col_index(columns, "Marketing_ROAS")
+    if (
+        thr is not None
+        and roas_i is not None
+        and layout_kind == "daily"
+    ):
+        # Avoid highlighting blanks: number less than threshold (empty cells are not numbers).
+        requests.append(
+            {
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [_grid(sheet_id, r0=d0, r1=d1, c0=roas_i, c1=roas_i + 1)],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "NUMBER_LESS",
+                                "values": [{"userEnteredValue": str(thr)}],
+                            },
+                            "format": {"backgroundColor": _ROAS_WARN_BG},
+                        },
+                    },
+                    "index": len(requests),
+                }
+            }
+        )
+
+    if not requests:
+        return
+    try:
+        ws.spreadsheet.batch_update({"requests": requests})
+    except Exception as exc:
+        logger.warning("Conditional formatting failed: %s", exc)
 
 
 def apply_data_column_widths(ws: gspread.Worksheet, num_cols: int, min_width: int = 112) -> None:

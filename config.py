@@ -54,6 +54,8 @@ class Settings:
     sheets_fancy_layout: bool
     meta_purchase_action_types: tuple[str, ...]
     meta_action_attribution_windows: tuple[str, ...] | None
+    sheets_conditional_format: bool
+    sheets_roas_warn_below: float | None  # None = do not highlight Marketing_ROAS
 
 
 def _require(name: str) -> str:
@@ -92,6 +94,21 @@ def _meta_purchase_action_types() -> tuple[str, ...]:
         "omni_purchase",
         "onsite_conversion.purchase",
     )
+
+
+def _sheets_roas_warn_below() -> float | None:
+    """
+    Marketing_ROAS conditional highlight when below this value (yellow).
+    Unset → 1.0; 0 or negative → None (disable ROAS rule).
+    """
+    raw = os.getenv("SHEETS_ROAS_WARN_BELOW", "").strip()
+    if not raw:
+        return 1.0
+    try:
+        v = float(raw)
+    except ValueError:
+        return 1.0
+    return v if v > 0 else None
 
 
 def _meta_action_attribution_windows() -> tuple[str, ...] | None:
@@ -239,4 +256,6 @@ def load_settings() -> Settings:
         sheets_fancy_layout=_env_bool("SHEETS_FANCY_LAYOUT", True),
         meta_purchase_action_types=_meta_purchase_action_types(),
         meta_action_attribution_windows=_meta_action_attribution_windows(),
+        sheets_conditional_format=_env_bool("SHEETS_CONDITIONAL_FORMAT", True),
+        sheets_roas_warn_below=_sheets_roas_warn_below(),
     )

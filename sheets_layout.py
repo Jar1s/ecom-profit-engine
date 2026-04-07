@@ -172,24 +172,23 @@ def sheet_values_with_summary(
             summary.append(_pad(width, [""]))
 
     elif kind == "meta":
-        title = "📊 Meta Ads — denné výdavky"
+        title = "📊 Meta Ads — denné výdavky (USD)"
         n = len(df)
-        spend = float(df["Ad_Spend"].sum()) if "Ad_Spend" in df.columns else 0.0
+        spend_usd = float(df["Ad_Spend_USD"].sum()) if "Ad_Spend_USD" in df.columns else 0.0
         summary.append(
             _pad(
                 width,
-                [title, f"Mena účtu: {cur}", f"USD/1: {rate_s}", "", "", "", "", ""],
+                [title, "Mena reportu: USD", "", "", "", "", "", ""],
             )
         )
-        spend_lbl = f"Ad_Spend ({cur})" if cur and cur != "—" else "Ad_Spend"
         summary.append(
             _pad(
                 width,
                 [
                     "Súčty",
                     f"Dní v tabuľke: {n}",
-                    spend_lbl,
-                    round(spend, 2),
+                    "Ad_Spend_USD",
+                    round(spend_usd, 2),
                     "",
                     "",
                     "",
@@ -197,24 +196,7 @@ def sheet_values_with_summary(
                 ],
             )
         )
-        if rate and "Ad_Spend_USD" in df.columns:
-            summary.append(
-                _pad(
-                    width,
-                    [
-                        "Ad_Spend USD",
-                        round(float(df["Ad_Spend_USD"].sum()), 2),
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                    ],
-                )
-            )
-        else:
-            summary.append(_pad(width, [""]))
+        summary.append(_pad(width, [""]))
 
     elif kind == "meta_campaigns":
         title = "📊 Meta — kampane × deň (spend + konverzie)"

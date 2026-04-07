@@ -94,10 +94,15 @@ def main() -> int:
         phase = "meta"
         logger.info("Fetching Meta Ads spend …")
         meta_rows = fetch_meta_daily_spend(settings)
-        meta_df = enrich_usd_columns(
+        meta_df_all = enrich_usd_columns(
             pd.DataFrame(meta_rows),
             settings.usd_per_local,
         )
+        # META_DATA is intentionally USD-only.
+        if "Ad_Spend_USD" in meta_df_all.columns:
+            meta_df = meta_df_all[["Date", "Ad_Spend_USD"]].copy()
+        else:
+            meta_df = meta_df_all[["Date"]].copy() if "Date" in meta_df_all.columns else meta_df_all.copy()
 
         meta_campaign_df = pd.DataFrame()
         if settings.meta_campaign_insights:

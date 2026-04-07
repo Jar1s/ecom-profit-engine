@@ -15,6 +15,7 @@ from sheets_charts import apply_daily_summary_charts
 from sheets_formatting import (
     apply_center_alignment,
     apply_data_column_widths,
+    apply_data_conditional_formatting,
     apply_summary_dashboard_format,
 )
 
@@ -166,6 +167,9 @@ def upload_dataframe(
         ws = sh.add_worksheet(title=worksheet_title, rows=3000, cols=40)
         logger.info("Created worksheet %r", worksheet_title)
 
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+
     if settings.sheets_fancy_layout and layout_kind is not None:
         values, header_row = sheet_values_with_summary(df, kind=layout_kind, settings=settings)
     else:
@@ -196,6 +200,15 @@ def upload_dataframe(
             apply_daily_summary_charts(ws, header_row_1based=header_row, df=df)
 
     apply_center_alignment(ws, num_rows=len(values), num_cols=num_cols)
+
+    apply_data_conditional_formatting(
+        ws,
+        settings=settings,
+        header_row_1based=header_row,
+        num_sheet_rows=len(values),
+        columns=list(df.columns),
+        layout_kind=layout_kind,
+    )
 
     logger.info(
         "Sheet %r: uploaded %s cell rows (header row=%s)",

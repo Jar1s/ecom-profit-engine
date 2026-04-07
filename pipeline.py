@@ -67,7 +67,7 @@ def main() -> int:
     phase = "supplier_costs"
     try:
         logger.info("Loading supplier costs from %s", settings.supplier_csv_path)
-        cost_map = load_cost_map(settings.supplier_csv_path)
+        cost_map = load_cost_map(settings)
         logger.info("pipeline_phase=%s_ok keys=%s", phase, len(cost_map))
 
         phase = "shopify"

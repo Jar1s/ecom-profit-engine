@@ -17,7 +17,7 @@ Order dates use Shopify `created_at` (ISO UTC). For store-local “business days
 2. `pip install -r requirements.txt` (optional: [`pyproject.toml`](pyproject.toml) declares the Vercel `app` entry via `[project.scripts]`.)
 3. Copy `.env.example` to `.env` and fill secrets.
 4. Google Sheets: either put a service account JSON file on disk (`GOOGLE_CREDS`, default `creds.json`) **or** set `GOOGLE_CREDENTIALS_JSON` to the full JSON string (used on Vercel / CI). Share the spreadsheet with the service account email (Editor).
-5. Put supplier costs in `data/supplier_costs.csv` (`Product`, `Cost` columns). Product names are matched after **trim + case-insensitive** normalization; tune titles in CSV to match Shopify line item names.
+5. Supplier unit costs: default file `data/supplier_costs.csv` (`Product`, `Cost` columns). **Or** set **`SUPPLIER_COSTS_SHEET_TAB`** (e.g. `SUPPLIER_COSTS`) to read costs from a **tab in the same Google spreadsheet** as `GOOGLE_SHEET_ID` / `GOOGLE_SHEET_NAME` — edit in the browser without redeploy; paste from Excel into that tab (header row `Product`, `Cost`). Product names are matched after **trim + case-insensitive** normalization; tune titles to match Shopify line item names.
 
 ## Environment variables
 

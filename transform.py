@@ -131,3 +131,56 @@ def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.Data
         s = pd.to_numeric(out[src], errors="coerce").fillna(0.0)
         out[dst] = (s * float(usd_per_local)).round(2)
     return out
+
+
+def enrich_meta_usd_columns(
+    df: pd.DataFrame,
+    *,
+    usd_per_local: float | None,
+    meta_spend_in_usd: bool,
+) -> pd.DataFrame:
+    """
+    Meta Marketing API returns spend (and usually purchase value) in the **ad account
+    currency** — often USD, not the same as Shopify store currency (e.g. AUD).
+
+    When ``meta_spend_in_usd`` is True, treat ``Ad_Spend`` / ``Purchase_Value`` as
+    already USD: ``*_USD`` columns are copies (no multiply by ``USD_PER_LOCAL_UNIT``).
+
+    When False, treat those amounts like shop/report currency (same behaviour as
+    :func:`enrich_usd_columns` for Meta columns only).
+    """
+    if df.empty:
+        return df
+    if meta_spend_in_usd:
+        out = df.copy()
+        if "Ad_Spend" in out.columns:
+            s = pd.to_numeric(out["Ad_Spend"], errors="coerce").fillna(0.0).round(2)
+            out["Ad_Spend_USD"] = s
+        if "Purchase_Value" in out.columns:
+            s = pd.to_numeric(out["Purchase_Value"], errors="coerce").fillna(0.0).round(2)
+            out["Purchase_Value_USD"] = s
+        return out
+    return enrich_usd_columns(df, usd_per_local)
+
+
+def meta_rows_for_daily_merge(
+    meta_rows: list[dict[str, Any]],
+    *,
+    meta_spend_in_usd: bool,
+    usd_per_local: float | None,
+) -> list[dict[str, Any]]:
+    """
+    Daily P&L merge uses ``Ad_Spend`` in the **same currency as Revenue** (typically
+    shop currency). If Meta reports USD and ``usd_per_local`` is set (USD per 1 AUD),
+    convert each day's Meta spend from USD to AUD: ``aud = usd / usd_per_local``.
+    """
+    if not meta_rows:
+        return meta_rows
+    if not meta_spend_in_usd or not usd_per_local or usd_per_local <= 0:
+        return list(meta_rows)
+    out: list[dict[str, Any]] = []
+    for r in meta_rows:
+        usd = float(r.get("Ad_Spend") or 0)
+        aud = usd / float(usd_per_local)
+        out.append({**r, "Ad_Spend": round(aud, 2)})
+    return out

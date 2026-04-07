@@ -51,6 +51,7 @@ class Settings:
     http_backoff_base_seconds: float
     report_currency: str
     usd_per_local: float | None
+    meta_spend_in_usd: bool
     sheets_fancy_layout: bool
     meta_purchase_action_types: tuple[str, ...]
     meta_action_attribution_windows: tuple[str, ...] | None
@@ -253,6 +254,10 @@ def load_settings() -> Settings:
         http_backoff_base_seconds=max(0.1, _optional_float("HTTP_BACKOFF_BASE_SECONDS", 1.5)),
         report_currency=os.getenv("REPORT_CURRENCY", "AUD").strip(),
         usd_per_local=_optional_positive_float_or_none("USD_PER_LOCAL_UNIT"),
+        # Meta Graph API returns spend in the ad account currency (often USD). When True,
+        # do not multiply Ad_Spend by USD_PER_LOCAL_UNIT for *_USD columns; merge with
+        # Shopify daily (AUD) converts Meta USD → AUD via USD_PER_LOCAL_UNIT.
+        meta_spend_in_usd=_env_bool("META_SPEND_IN_USD", True),
         sheets_fancy_layout=_env_bool("SHEETS_FANCY_LAYOUT", True),
         meta_purchase_action_types=_meta_purchase_action_types(),
         meta_action_attribution_windows=_meta_action_attribution_windows(),

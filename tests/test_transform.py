@@ -7,7 +7,9 @@ import pandas as pd
 from transform import (
     daily_summary_from_orders,
     enrich_line_items,
+    enrich_meta_usd_columns,
     merge_daily_with_meta,
+    meta_rows_for_daily_merge,
     order_level_summary,
 )
 
@@ -73,6 +75,27 @@ class TestTransform(unittest.TestCase):
         meta = [{"Date": "2026-04-01", "Ad_Spend": 25.0}]
         merged = merge_daily_with_meta(daily, meta)
         self.assertEqual(merged.loc[0, "Marketing_ROAS"], 4.0)
+
+    def test_enrich_meta_usd_columns_already_usd(self) -> None:
+        df = pd.DataFrame([{"Date": "2026-04-01", "Ad_Spend": 100.0}])
+        out = enrich_meta_usd_columns(
+            df, usd_per_local=0.65, meta_spend_in_usd=True
+        )
+        self.assertEqual(out.loc[0, "Ad_Spend_USD"], 100.0)
+
+    def test_enrich_meta_usd_columns_shop_currency(self) -> None:
+        df = pd.DataFrame([{"Date": "2026-04-01", "Ad_Spend": 100.0}])
+        out = enrich_meta_usd_columns(
+            df, usd_per_local=0.65, meta_spend_in_usd=False
+        )
+        self.assertEqual(out.loc[0, "Ad_Spend_USD"], 65.0)
+
+    def test_meta_rows_for_daily_merge_usd_to_aud(self) -> None:
+        rows = [{"Date": "2026-04-01", "Ad_Spend": 65.0}]
+        merged = meta_rows_for_daily_merge(
+            rows, meta_spend_in_usd=True, usd_per_local=0.65
+        )
+        self.assertEqual(merged[0]["Ad_Spend"], 100.0)
 
 
 if __name__ == "__main__":

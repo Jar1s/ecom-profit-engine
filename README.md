@@ -85,6 +85,7 @@ If this repository is only this project, use the repo root as the Vercel **Root 
 
 - User access token with `ads_read` (Graph API Explorer), or a system user token you manage yourself.
 - **Recommended for cron:** add `META_APP_ID` and `META_APP_SECRET` from **App settings → Basic**. Keep `META_TOKEN` as your user token (even short-lived from Explorer); each run refreshes it to a long-lived token automatically. You still need to re-authorize if Meta revokes access or the user changes password—typically months apart.
+- **Currency:** Graph API `spend` is in the **ad account currency** (often USD), while Shopify revenue may be in another currency (e.g. AUD). Default **`META_SPEND_IN_USD=1`**: Meta amounts are treated as USD (`Ad_Spend_USD` equals API spend); merging with daily P&L converts Meta USD → shop currency using **`USD_PER_LOCAL_UNIT`** so `Marketing_ROAS` is comparable. Set **`META_SPEND_IN_USD=0`** if your ad account uses the same currency as the shop.
 - On `401` / OAuth `190`, update `META_TOKEN` or check app permissions.
 
 ## Tests

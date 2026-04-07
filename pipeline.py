@@ -16,8 +16,10 @@ from sheets import upload_dataframe
 from transform import (
     daily_summary_from_orders,
     enrich_line_items,
+    enrich_meta_usd_columns,
     enrich_usd_columns,
     merge_daily_with_meta,
+    meta_rows_for_daily_merge,
     order_level_summary,
 )
 
@@ -94,9 +96,15 @@ def main() -> int:
         phase = "meta"
         logger.info("Fetching Meta Ads spend …")
         meta_rows = fetch_meta_daily_spend(settings)
-        meta_df_all = enrich_usd_columns(
+        if settings.meta_spend_in_usd and not settings.usd_per_local:
+            logger.warning(
+                "META_SPEND_IN_USD=1 but USD_PER_LOCAL_UNIT is unset: "
+                "daily merge may mix Meta USD with Shopify shop currency for ROAS."
+            )
+        meta_df_all = enrich_meta_usd_columns(
             pd.DataFrame(meta_rows),
-            settings.usd_per_local,
+            usd_per_local=settings.usd_per_local,
+            meta_spend_in_usd=settings.meta_spend_in_usd,
         )
         # META_DATA is intentionally USD-only.
         if "Ad_Spend_USD" in meta_df_all.columns:
@@ -109,15 +117,21 @@ def main() -> int:
             phase = "meta_campaigns"
             logger.info("Fetching Meta campaign insights (spend + conversions) …")
             _mc_raw = fetch_meta_campaign_insights(settings)
-            meta_campaign_df = enrich_usd_columns(
+            meta_campaign_df = enrich_meta_usd_columns(
                 pd.DataFrame(_mc_raw) if _mc_raw else pd.DataFrame(columns=_META_CAMPAIGN_COLUMNS),
-                settings.usd_per_local,
+                usd_per_local=settings.usd_per_local,
+                meta_spend_in_usd=settings.meta_spend_in_usd,
             )
 
         phase = "merge_meta"
         logger.info("Merging daily summary with Meta spend …")
+        meta_for_merge = meta_rows_for_daily_merge(
+            meta_rows,
+            meta_spend_in_usd=settings.meta_spend_in_usd,
+            usd_per_local=settings.usd_per_local,
+        )
         daily_final = enrich_usd_columns(
-            merge_daily_with_meta(daily_df, meta_rows),
+            merge_daily_with_meta(daily_df, meta_for_merge),
             settings.usd_per_local,
         )
 

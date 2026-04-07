@@ -70,7 +70,8 @@ If this repository is only this project, use the repo root as the Vercel **Root 
    - `GOOGLE_CREDENTIALS_JSON` — entire service account JSON (one line or multiline in the dashboard).
    - `CRON_SECRET` — random string; manual calls use `Authorization: Bearer <CRON_SECRET>`. Scheduled Vercel Cron is also allowed via the `x-vercel-cron: 1` header (see [`api/index.py`](api/index.py)). Without `CRON_SECRET`, `/cron` is open.
 3. **Function duration:** we do **not** set `functions` in `vercel.json` — Python/FastAPI builds often don’t match those glob keys and Vercel fails with [unmatched function pattern](https://vercel.link/unmatched-function-pattern). Set **max duration** in the Vercel dashboard: Project → **Settings** → **Functions** (Hobby up to **300s**, Pro up to **800s**). If you hit timeouts, reduce work (e.g. `META_LOOKBACK_DAYS`) or raise the limit there.
-4. After deploy, cron runs automatically. You can also trigger **GET** or **POST** `https://<your-deployment>/cron` with the `Authorization` header when `CRON_SECRET` is set.
+4. **Cron schedule** is in [`vercel.json`](vercel.json) (default `*/10 * * * *` = every 10 minutes UTC). **Vercel Hobby** allows at most **one cron run per day**; a more frequent expression fails at deploy time unless you upgrade to **Pro** (or use [GitHub Actions](.github/workflows/ecom-profit-engine.yml) / an external scheduler to hit `/cron`).
+5. After deploy, cron runs automatically. You can also trigger **GET** or **POST** `https://<your-deployment>/cron` with the `Authorization` header when `CRON_SECRET` is set.
 
 `supplier_costs.csv` is read from the deployment bundle (commit it or adjust `SUPPLIER_COSTS_CSV` if you change layout).
 

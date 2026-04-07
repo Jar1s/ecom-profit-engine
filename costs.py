@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import gspread.exceptions
 import pandas as pd
 
 from normalize import normalize_product_name
@@ -51,8 +50,9 @@ def _cost_map_from_dataframe(df: pd.DataFrame, *, source: str) -> dict[str, floa
 
 def load_cost_map(settings: "Settings") -> dict[str, float]:
     """
-    Supplier costs: either a worksheet in the same Google spreadsheet as the pipeline
-    output (``SUPPLIER_COSTS_SHEET_TAB``), or a local CSV (``SUPPLIER_COSTS_CSV``).
+    Supplier costs: worksheet in the same spreadsheet as the pipeline (default tab name
+    ``SUPPLIER_COSTS``, tab created on first use), unless ``SUPPLIER_COSTS_FROM_CSV`` is set —
+    then ``SUPPLIER_COSTS_CSV`` file is used.
     """
     if settings.supplier_costs_sheet_tab:
         return _load_cost_map_from_google_sheet(settings)
@@ -67,21 +67,13 @@ def _load_cost_map_from_csv(csv_path: Path) -> dict[str, float]:
 
 
 def _load_cost_map_from_google_sheet(settings: "Settings") -> dict[str, float]:
-    from sheets import _authorize, _open_spreadsheet
+    from sheets import get_or_create_supplier_costs_worksheet
 
     tab = (settings.supplier_costs_sheet_tab or "").strip()
     if not tab:
         raise RuntimeError("supplier_costs_sheet_tab is empty")
 
-    client = _authorize(settings)
-    sh = _open_spreadsheet(client, settings)
-    try:
-        ws = sh.worksheet(tab)
-    except gspread.exceptions.WorksheetNotFound as exc:
-        raise RuntimeError(
-            f"Supplier worksheet {tab!r} not found in spreadsheet {sh.title!r}. "
-            "Add a tab with header row: Product, Cost"
-        ) from exc
+    ws = get_or_create_supplier_costs_worksheet(settings, tab)
 
     values = ws.get_all_values()
     if not values:

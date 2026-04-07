@@ -108,17 +108,11 @@ _MAX_BILL_UPLOAD_BYTES = 4 * 1024 * 1024
 
 async def _run_supplier_bill_import(file: UploadFile) -> dict[str, object]:
     """Parse BillDetail file and overwrite supplier costs worksheet. Raises HTTPException."""
-    from config import load_settings
+    from config import DEFAULT_SUPPLIER_COSTS_SHEET_TAB, load_settings
 
     settings = load_settings()
-    tab = (settings.supplier_costs_sheet_tab or "").strip()
-    if not tab:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Nastav SUPPLIER_COSTS_SHEET_TAB (názov záložky v Google Sheet, napr. SUPPLIER_COSTS)."
-            ),
-        )
+    # Záložka sa vytvorí automaticky ak neexistuje; pri SUPPLIER_COSTS_FROM_CSV ide zápis do predvolenej záložky.
+    tab = (settings.supplier_costs_sheet_tab or "").strip() or DEFAULT_SUPPLIER_COSTS_SHEET_TAB
 
     name = (file.filename or "").strip().lower()
     if not name.endswith((".xls", ".xlsx")):

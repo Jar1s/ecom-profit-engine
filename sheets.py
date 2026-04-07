@@ -87,6 +87,22 @@ def _open_spreadsheet(client: gspread.Client, settings: Settings) -> gspread.Spr
         ) from exc
 
 
+def get_or_create_supplier_costs_worksheet(
+    settings: Settings, worksheet_title: str
+) -> gspread.Worksheet:
+    """Otvorí záložku alebo ju vytvorí s hlavičkou Product | Cost."""
+    client = _authorize(settings)
+    sh = _open_spreadsheet(client, settings)
+    title = worksheet_title.strip()
+    try:
+        return sh.worksheet(title)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title=title, rows=3000, cols=10)
+        ws.append_row(["Product", "Cost"], value_input_option="USER_ENTERED")
+        logger.info("Created supplier worksheet %r with header row", title)
+        return ws
+
+
 def dataframe_to_values(df: pd.DataFrame) -> list[list[object]]:
     """2D list for gspread; NaN -> empty string."""
     filled = df.copy()

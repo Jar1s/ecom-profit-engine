@@ -16,11 +16,18 @@ def _sheet_url() -> str | None:
 
 def ui_status() -> dict[str, Any]:
     """Údaje na dashboard (bez načítania celého Settings)."""
-    tab = os.getenv("SUPPLIER_COSTS_SHEET_TAB", "").strip()
     name = os.getenv("GOOGLE_SHEET_NAME", "").strip()
+    if os.getenv("SUPPLIER_COSTS_FROM_CSV", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        tab_disp = "CSV (pipeline číta súbor, nie Sheet)"
+    else:
+        tab_disp = os.getenv("SUPPLIER_COSTS_SHEET_TAB", "").strip() or "SUPPLIER_COSTS"
     return {
         "sheet_url": _sheet_url(),
-        "supplier_tab": tab or None,
+        "supplier_tab": tab_disp,
         "sheet_title_hint": name or None,
         "cron_secret_set": bool(os.getenv("CRON_SECRET", "").strip()),
     }

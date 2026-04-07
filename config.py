@@ -15,6 +15,9 @@ load_dotenv()
 
 _ROOT = Path(__file__).resolve().parent
 
+# Ak nie je SUPPLIER_COSTS_SHEET_TAB, použije sa táto záložka (automaticky sa vytvorí pri prvom zápise/načítaní).
+DEFAULT_SUPPLIER_COSTS_SHEET_TAB = "SUPPLIER_COSTS"
+
 _GOOGLE_SHEET_ID_IN_URL = re.compile(
     r"/spreadsheets/d/([a-zA-Z0-9_-]+)", re.IGNORECASE
 )
@@ -251,7 +254,14 @@ def load_settings() -> Settings:
         google_creds_path=google_creds_path,
         google_service_account_info=google_info,
         supplier_csv_path=(_ROOT / csv_rel).resolve(),
-        supplier_costs_sheet_tab=os.getenv("SUPPLIER_COSTS_SHEET_TAB", "").strip() or None,
+        supplier_costs_sheet_tab=(
+            None
+            if _env_bool("SUPPLIER_COSTS_FROM_CSV", False)
+            else (
+                os.getenv("SUPPLIER_COSTS_SHEET_TAB", "").strip()
+                or DEFAULT_SUPPLIER_COSTS_SHEET_TAB
+            )
+        ),
         http_max_retries=max(1, _optional_int("HTTP_MAX_RETRIES", 5)),
         http_backoff_base_seconds=max(0.1, _optional_float("HTTP_BACKOFF_BASE_SECONDS", 1.5)),
         report_currency=os.getenv("REPORT_CURRENCY", "AUD").strip(),

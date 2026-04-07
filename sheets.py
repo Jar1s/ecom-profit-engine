@@ -97,6 +97,49 @@ def dataframe_to_values(df: pd.DataFrame) -> list[list[object]]:
     return [header] + rows
 
 
+def replace_worksheet_simple(
+    settings: Settings,
+    worksheet_title: str,
+    df: pd.DataFrame,
+    *,
+    row_chunk: int = _DEFAULT_ROW_CHUNK,
+) -> None:
+    """
+    Clear tab and write dataframe (header + rows), chunked. No charts or conditional format.
+    Creates the worksheet if missing.
+    """
+    client = _authorize(settings)
+    sh = _open_spreadsheet(client, settings)
+    try:
+        ws = sh.worksheet(worksheet_title)
+    except gspread.exceptions.WorksheetNotFound:
+        ws = sh.add_worksheet(title=worksheet_title, rows=3000, cols=10)
+        logger.info("Created worksheet %r", worksheet_title)
+
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    values = dataframe_to_values(df)
+    if not values:
+        ws.clear()
+        logger.info("Sheet %r: empty — cleared", worksheet_title)
+        return
+
+    num_cols = max(len(r) for r in values)
+    ws.clear()
+    for start in range(0, len(values), row_chunk):
+        chunk = values[start : start + row_chunk]
+        start_row = start + 1
+        end_row = start + len(chunk)
+        end_a1 = rowcol_to_a1(end_row, num_cols)
+        range_a1 = f"A{start_row}:{end_a1}"
+        ws.update(chunk, range_a1, value_input_option="USER_ENTERED")
+    logger.info(
+        "Sheet %r: wrote %s rows (simple replace)",
+        worksheet_title,
+        len(values),
+    )
+
+
 def _apply_sheet_style(
     ws: gspread.Worksheet,
     header_row: int,

@@ -217,7 +217,16 @@ def sheet_values_with_summary(
         summary.append(
             _pad(
                 width,
-                [title, f"Mena účtu: {cur}", f"USD/1: {rate_s}", "", "", "", "", ""],
+                [
+                    title,
+                    "Spend a konverzie: mena reklamného účtu (Meta), nie Shopify",
+                    f"USD/1 (Shopify): {rate_s}",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
             )
         )
         summary.append(

@@ -174,8 +174,33 @@ def fetch_meta_daily_spend(settings: Settings) -> list[dict[str, Any]]:
         except (TypeError, ValueError):
             spend = 0.0
         rows.append({"Date": ds, "Ad_Spend": spend})
-    logger.info("Meta: %s account daily spend rows for %s .. %s", len(rows), since, until)
+    rows = _aggregate_daily_spend_by_date(rows)
+    total = sum(float(r.get("Ad_Spend") or 0) for r in rows)
+    logger.info(
+        "Meta account daily spend: %s days, sum=%.2f (API currency), range %s .. %s",
+        len(rows),
+        total,
+        since,
+        until,
+    )
     return rows
+
+
+def _aggregate_daily_spend_by_date(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sum spend per date_start (Graph API can occasionally return duplicate days)."""
+    if not rows:
+        return rows
+    by_date: dict[str, float] = {}
+    for r in rows:
+        ds = str(r.get("Date") or "").strip()
+        if not ds:
+            continue
+        try:
+            v = float(r.get("Ad_Spend") or 0)
+        except (TypeError, ValueError):
+            v = 0.0
+        by_date[ds] = by_date.get(ds, 0.0) + v
+    return [{"Date": ds, "Ad_Spend": round(v, 2)} for ds, v in sorted(by_date.items())]
 
 
 def fetch_meta_campaign_insights(settings: Settings) -> list[dict[str, Any]]:

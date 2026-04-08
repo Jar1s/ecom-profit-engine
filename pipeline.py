@@ -12,10 +12,10 @@ from config import load_settings
 from costs import load_cost_maps
 from data_quality import build_missing_supplier_costs_report, log_missing_supplier_costs
 from meta_ads import fetch_meta_campaign_insights, fetch_meta_daily_spend
-from shopify_client import fetch_order_line_rows
+from bookkeeping_us import bookkeeping_us_monthly
+from shopify_client import fetch_orders_and_line_rows
 from sheets import pause_between_sheet_uploads, replace_worksheet_simple, upload_dataframe
 from transform import (
-    bookkeeping_monthly_from_daily,
     daily_summary_from_orders,
     daily_summary_usd_primary,
     enrich_line_items,
@@ -85,7 +85,7 @@ def main() -> int:
 
         phase = "shopify"
         logger.info("Fetching Shopify orders …")
-        line_rows = fetch_order_line_rows(settings)
+        shopify_orders, line_rows = fetch_orders_and_line_rows(settings)
         logger.info("pipeline_phase=%s_ok line_rows=%s", phase, len(line_rows))
 
         phase = "enrich"
@@ -150,7 +150,7 @@ def main() -> int:
         if settings.daily_summary_usd_primary:
             daily_final = daily_summary_usd_primary(daily_final)
 
-        bookkeeping_df = bookkeeping_monthly_from_daily(daily_final)
+        bookkeeping_df = bookkeeping_us_monthly(shopify_orders, orders_df, daily_final)
 
         phase = "sheets"
         _sheet_target = settings.google_sheet_id or settings.google_sheet_name

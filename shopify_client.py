@@ -93,9 +93,15 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-def fetch_order_line_rows(settings: Settings) -> list[dict[str, Any]]:
-    """High-level: paginate orders and return flattened line-item rows."""
+def fetch_orders_and_line_rows(settings: Settings) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Paginate orders once; return (raw orders, flattened line-item rows)."""
     orders = fetch_all_orders(settings)
     rows = orders_to_line_rows(orders)
     logger.info("Shopify: %s orders -> %s line rows", len(orders), len(rows))
+    return orders, rows
+
+
+def fetch_order_line_rows(settings: Settings) -> list[dict[str, Any]]:
+    """High-level: paginate orders and return flattened line-item rows."""
+    _, rows = fetch_orders_and_line_rows(settings)
     return rows

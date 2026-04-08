@@ -277,6 +277,7 @@ def apply_data_conditional_formatting(
     requests: list[dict[str, Any]] = []
 
     gp = _col_index(columns, "Gross_Profit")
+    gp_us = _col_index(columns, "Gross_profit")
     if gp is not None and layout_kind in ("orders", "order_level", "daily", "bookkeeping"):
         requests.append(
             {
@@ -296,6 +297,25 @@ def apply_data_conditional_formatting(
             }
         )
 
+    if gp_us is not None and layout_kind == "bookkeeping":
+        requests.append(
+            {
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [_grid(sheet_id, r0=d0, r1=d1, c0=gp_us, c1=gp_us + 1)],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "NUMBER_LESS",
+                                "values": [{"userEnteredValue": "0"}],
+                            },
+                            "format": {"backgroundColor": _NEG_PROFIT_BG},
+                        },
+                    },
+                    "index": len(requests),
+                }
+            }
+        )
+
     net_i = _col_index(columns, "Net_Profit")
     if net_i is not None and layout_kind in ("daily", "bookkeeping"):
         requests.append(
@@ -303,6 +323,26 @@ def apply_data_conditional_formatting(
                 "addConditionalFormatRule": {
                     "rule": {
                         "ranges": [_grid(sheet_id, r0=d0, r1=d1, c0=net_i, c1=net_i + 1)],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "NUMBER_LESS",
+                                "values": [{"userEnteredValue": "0"}],
+                            },
+                            "format": {"backgroundColor": _NEG_PROFIT_BG},
+                        },
+                    },
+                    "index": len(requests),
+                }
+            }
+        )
+
+    op_i = _col_index(columns, "Operating_income")
+    if op_i is not None and layout_kind == "bookkeeping":
+        requests.append(
+            {
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [_grid(sheet_id, r0=d0, r1=d1, c0=op_i, c1=op_i + 1)],
                         "booleanRule": {
                             "condition": {
                                 "type": "NUMBER_LESS",

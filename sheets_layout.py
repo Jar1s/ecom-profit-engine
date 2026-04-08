@@ -395,27 +395,38 @@ def sheet_values_with_summary(
 
     elif kind == "bookkeeping":
         n = len(df)
-        rev = float(df["Sales_Revenue"].sum()) if "Sales_Revenue" in df.columns else 0.0
-        cogs = float(df["COGS"].sum()) if "COGS" in df.columns else 0.0
-        gp = float(df["Gross_Profit"].sum()) if "Gross_Profit" in df.columns else 0.0
-        mkt = float(df["Marketing_Spend"].sum()) if "Marketing_Spend" in df.columns else 0.0
-        net = float(df["Net_Profit"].sum()) if "Net_Profit" in df.columns else 0.0
         cur = settings.report_currency.strip() or "—"
         rate = settings.usd_per_local
         rate_s = f"{rate:.6g}" if rate else "—"
         usd_note = (
-            "Sumy v USD (DAILY_SUMMARY režim USD_PER_LOCAL_UNIT)."
+            "Amounts in shop currency; with DAILY_SUMMARY USD primary + USD_PER_LOCAL_UNIT, "
+            "daily merge matches Meta — BOOKKEEPING order fields stay in shop currency."
             if settings.daily_summary_usd_primary and rate
-            else f"Sumy v mene obchodu ({cur}); Meta merge používa rovnakú bázu ako DAILY_SUMMARY."
+            else f"Amounts in shop/report currency ({cur}). US-oriented management P&L."
         )
+
+        def _sum(col: str) -> float:
+            if col not in df.columns:
+                return 0.0
+            return float(pd.to_numeric(df[col], errors="coerce").fillna(0).sum())
+
+        net_sales = _sum("Net_sales")
+        cogs = _sum("COGS")
+        gp = _sum("Gross_profit")
+        mkt = _sum("Marketing_advertising")
+        op = _sum("Operating_income")
+        tax_coll = _sum("Sales_tax_collected")
+
         summary.append(
             _pad(
                 width,
                 [
-                    "📒 Bookkeeping — mesačný P&L (management reporting)",
+                    "📒 Bookkeeping (US) — monthly management P&L",
                     usd_note,
-                    "Nie je to účtovná závierka: chýbajú napr. dane, poplatky brány, odpisy, ostatné OPEX.",
-                    f"Detail objednávok: ORDER_LEVEL · položky: ORDERS_DB · REPORT_CURRENCY={cur} · USD/1={rate_s}",
+                    "Not tax or legal advice. Sales tax shown for reference (pass-through). "
+                    "Refunds = sum of refund transactions in Shopify. Use a CPA for federal/state filings.",
+                    f"Orders: Shopify REST · COGS: pipeline line items · Ads: Meta (DAILY_SUMMARY). "
+                    f"REPORT_CURRENCY={cur} · USD_PER_LOCAL_UNIT={rate_s}",
                     "",
                     "",
                     "",
@@ -427,13 +438,13 @@ def sheet_values_with_summary(
             _pad(
                 width,
                 [
-                    "Súčty (všetky mesiace v tabuľke)",
-                    f"Mesačných riadkov: {n}",
-                    "Sales_Revenue",
-                    round(rev, 2),
+                    "Totals (all months in table)",
+                    f"Month rows: {n}",
+                    "Net_sales",
+                    round(net_sales, 2),
                     "COGS",
                     round(cogs, 2),
-                    "Gross_Profit",
+                    "Gross_profit",
                     round(gp, 2),
                 ],
             )
@@ -442,11 +453,12 @@ def sheet_values_with_summary(
             _pad(
                 width,
                 [
-                    "Marketing_Spend",
+                    "Marketing_advertising",
                     round(mkt, 2),
-                    "Net_Profit",
-                    round(net, 2),
-                    "",
+                    "Operating_income",
+                    round(op, 2),
+                    "Sales_tax_collected (ref.)",
+                    round(tax_coll, 2),
                     "",
                     "",
                     "",

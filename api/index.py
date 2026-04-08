@@ -216,9 +216,12 @@ async def _run_supplier_bill_import(file: UploadFile) -> dict[str, object]:
     }
 
 
-@app.get("/")
-def health() -> dict[str, str]:
-    # On Vercel, routes are at domain root (this file is api/index.py but "/" is the app root).
+@app.get("/", response_model=None)
+def root(request: Request) -> dict[str, str] | RedirectResponse:
+    # Prehliadač na úvodnej URL dostane rozhranie namiesto holého JSON.
+    accept = (request.headers.get("accept") or "").lower()
+    if "text/html" in accept:
+        return RedirectResponse(url="/app", status_code=302)
     return {
         "service": "ecom-profit-engine",
         "app": "/app",

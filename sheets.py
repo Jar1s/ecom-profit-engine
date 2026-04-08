@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
+import random
+import time
+from collections.abc import Callable
+from typing import TypeVar
 
 import gspread
 import pandas as pd
@@ -29,6 +34,57 @@ _SCOPES_WITH_DRIVE = (
 
 # Google Sheets API practical chunk size for update calls
 _DEFAULT_ROW_CHUNK = 500
+
+_T = TypeVar("_T")
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def pause_between_sheet_uploads() -> None:
+    """
+    Space out tab uploads so the pipeline stays under Sheets **writes per minute** quota.
+    Override with SHEETS_PAUSE_BETWEEN_TABS_SECONDS (default 1.5).
+    """
+    sec = _env_float("SHEETS_PAUSE_BETWEEN_TABS_SECONDS", 1.5)
+    if sec > 0:
+        time.sleep(sec)
+
+
+def _inter_chunk_pause() -> None:
+    sec = _env_float("SHEETS_INTER_CHUNK_PAUSE_SECONDS", 0.35)
+    if sec > 0:
+        time.sleep(sec)
+
+
+def _retry_sheet_write(fn: Callable[[], _T], *, what: str = "Sheets API") -> _T:
+    """Retry on HTTP 429 (rate limit / write quota per minute)."""
+    max_attempts = 10
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except gspread.exceptions.APIError as exc:
+            sc = getattr(exc.response, "status_code", None)
+            if sc == 429 and attempt < max_attempts - 1:
+                delay = min(120.0, (2.0**attempt) * 1.25) + random.uniform(0.25, 1.5)
+                logger.warning(
+                    "%s rate limit (429), sleeping %.1fs [%s/%s]: %s",
+                    what,
+                    delay,
+                    attempt + 1,
+                    max_attempts,
+                    exc,
+                )
+                time.sleep(delay)
+                continue
+            raise
 
 
 def _authorize(settings: Settings) -> gspread.Client:
@@ -136,19 +192,27 @@ def replace_worksheet_simple(
     df.columns = [str(c).strip() for c in df.columns]
     values = dataframe_to_values(df)
     if not values:
-        ws.clear()
+        _retry_sheet_write(lambda: ws.clear(), what="clear")
         logger.info("Sheet %r: empty — cleared", worksheet_title)
         return
 
     num_cols = max(len(r) for r in values)
-    ws.clear()
+    _retry_sheet_write(lambda: ws.clear(), what="clear")
     for start in range(0, len(values), row_chunk):
         chunk = values[start : start + row_chunk]
         start_row = start + 1
         end_row = start + len(chunk)
         end_a1 = rowcol_to_a1(end_row, num_cols)
         range_a1 = f"A{start_row}:{end_a1}"
-        ws.update(chunk, range_a1, value_input_option="USER_ENTERED")
+
+        def _write_chunk(
+            c: list[list[object]] = chunk,
+            rng: str = range_a1,
+        ) -> None:
+            ws.update(c, rng, value_input_option="USER_ENTERED")
+
+        _retry_sheet_write(_write_chunk, what="update")
+        _inter_chunk_pause()
     logger.info(
         "Sheet %r: wrote %s rows (simple replace)",
         worksheet_title,
@@ -235,12 +299,12 @@ def upload_dataframe(
         values, header_row = sheet_values_plain(df)
 
     if not values:
-        ws.clear()
+        _retry_sheet_write(lambda: ws.clear(), what="clear")
         logger.info("Sheet %r: empty — cleared", worksheet_title)
         return
 
     num_cols = max(len(r) for r in values)
-    ws.clear()
+    _retry_sheet_write(lambda: ws.clear(), what="clear")
 
     for start in range(0, len(values), row_chunk):
         chunk = values[start : start + row_chunk]
@@ -248,25 +312,55 @@ def upload_dataframe(
         end_row = start + len(chunk)
         end_a1 = rowcol_to_a1(end_row, num_cols)
         range_a1 = f"A{start_row}:{end_a1}"
-        ws.update(chunk, range_a1, value_input_option="USER_ENTERED")
+
+        def _write_chunk(
+            c: list[list[object]] = chunk,
+            rng: str = range_a1,
+        ) -> None:
+            ws.update(c, rng, value_input_option="USER_ENTERED")
+
+        _retry_sheet_write(_write_chunk, what="update")
+        _inter_chunk_pause()
         logger.debug("Sheet %r: wrote rows %s-%s", worksheet_title, start_row, end_row)
 
     if settings.sheets_fancy_layout and layout_kind is not None:
-        apply_summary_dashboard_format(ws, header_row_1based=header_row, num_cols=num_cols)
-        _apply_sheet_style(ws, header_row, num_cols, fancy_summary=True)
-        apply_data_column_widths(ws, num_cols)
+        _retry_sheet_write(
+            lambda: apply_summary_dashboard_format(
+                ws, header_row_1based=header_row, num_cols=num_cols
+            ),
+            what="format",
+        )
+        _retry_sheet_write(
+            lambda: _apply_sheet_style(ws, header_row, num_cols, fancy_summary=True),
+            what="format",
+        )
+        _retry_sheet_write(
+            lambda: apply_data_column_widths(ws, num_cols),
+            what="format",
+        )
         if layout_kind == "daily":
-            apply_daily_summary_charts(ws, header_row_1based=header_row, df=df)
+            _retry_sheet_write(
+                lambda: apply_daily_summary_charts(
+                    ws, header_row_1based=header_row, df=df
+                ),
+                what="charts",
+            )
 
-    apply_center_alignment(ws, num_rows=len(values), num_cols=num_cols)
+    _retry_sheet_write(
+        lambda: apply_center_alignment(ws, num_rows=len(values), num_cols=num_cols),
+        what="format",
+    )
 
-    apply_data_conditional_formatting(
-        ws,
-        settings=settings,
-        header_row_1based=header_row,
-        num_sheet_rows=len(values),
-        columns=list(df.columns),
-        layout_kind=layout_kind,
+    _retry_sheet_write(
+        lambda: apply_data_conditional_formatting(
+            ws,
+            settings=settings,
+            header_row_1based=header_row,
+            num_sheet_rows=len(values),
+            columns=list(df.columns),
+            layout_kind=layout_kind,
+        ),
+        what="format",
     )
 
     logger.info(

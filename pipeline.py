@@ -12,7 +12,7 @@ from config import load_settings
 from costs import load_cost_map
 from meta_ads import fetch_meta_campaign_insights, fetch_meta_daily_spend
 from shopify_client import fetch_order_line_rows
-from sheets import upload_dataframe
+from sheets import pause_between_sheet_uploads, upload_dataframe
 from transform import (
     daily_summary_from_orders,
     enrich_line_items,
@@ -139,8 +139,11 @@ def main() -> int:
         _sheet_target = settings.google_sheet_id or settings.google_sheet_name
         logger.info("Uploading to Google Sheets %r …", _sheet_target)
         upload_dataframe(settings, orders_df, SHEET_ORDERS_DB, layout_kind="orders")
+        pause_between_sheet_uploads()
         upload_dataframe(settings, order_df, SHEET_ORDER_LEVEL, layout_kind="order_level")
+        pause_between_sheet_uploads()
         upload_dataframe(settings, meta_df, SHEET_META_DATA, layout_kind="meta")
+        pause_between_sheet_uploads()
         if settings.meta_campaign_insights:
             upload_dataframe(
                 settings,
@@ -148,6 +151,7 @@ def main() -> int:
                 SHEET_META_CAMPAIGNS,
                 layout_kind="meta_campaigns",
             )
+            pause_between_sheet_uploads()
         upload_dataframe(settings, daily_final, SHEET_DAILY, layout_kind="daily")
 
         logger.info(

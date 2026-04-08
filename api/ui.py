@@ -42,7 +42,7 @@ def _shell(
 ) -> str:
     nav_items = [
         ("Domov", "/app", "home"),
-        ("Náklady dodávateľa", "/app/naklady", "naklady"),
+        ("BillDetail", "/app/naklady", "naklady"),
     ]
     nav_html = ""
     if show_nav:
@@ -164,7 +164,7 @@ def page_dashboard(st: dict[str, Any]) -> str:
     <div class="cards" style="margin-top:1.25rem">
       <div class="card">
         <h2>Náklady z BillDetail</h2>
-        <p>Súbor .xls / .xlsx z dodávateľa sa spracuje a doplní do záložky nákladov v tabuľke.</p>
+        <p>Nahraj len export od dodávateľa (BillDetail, .xls alebo .xlsx). Náklady sa doplnia do Sheet a <strong>report sa sám aktualizuje</strong> — nemusíš nič ďalšie spúšťať.</p>
         <a class="btn" href="/app/naklady">Nahrať súbor</a>
       </div>
       <div class="card">
@@ -179,16 +179,16 @@ def page_dashboard(st: dict[str, Any]) -> str:
 
 def page_naklady() -> str:
     body = """
-    <h1>Náklady dodávateľa</h1>
-    <p class="lead">Vyber BillDetail export (.xls alebo .xlsx). Existujúce riadky v záložke nákladov sa nahradia týmto súborom.</p>
+    <h1>BillDetail export</h1>
+    <p class="lead">Vyber súbor z portálu dodávateľa (záložka BillDetail, typ <strong>.xls</strong> alebo <strong>.xlsx</strong>). Po odoslaní sa spracujú náklady, zapíšu do Google Sheet a <strong>spustí sa celý report</strong> (objednávky, reklamy, …) — stačí tento jeden krok.</p>
     <form method="post" action="/supplier-import" enctype="multipart/form-data">
       <label for="file">Súbor</label>
       <input type="file" id="file" name="file" accept=".xls,.xlsx,application/vnd.ms-excel" required/>
-      <button type="submit" class="btn" style="margin-top:1rem;width:100%">Nahrať a zapísať do tabuľky</button>
+      <button type="submit" class="btn" style="margin-top:1rem;width:100%">Nahrať a aktualizovať všetko</button>
     </form>
-    <p class="hint">Max. cca 4 MB (limit hostingu).</p>
+    <p class="hint">Max. cca 4 MB. Ak máš SUPPLIER_COSTS_FROM_CSV=1, automatický report sa preskočí (pipeline číta CSV z repa, nie Sheet).</p>
     """
-    return _shell(title="Náklady dodávateľa", body=body, active="naklady")
+    return _shell(title="BillDetail import", body=body, active="naklady")
 
 
 def page_message(*, ok: bool, title: str, message: str, back_href: str) -> str:

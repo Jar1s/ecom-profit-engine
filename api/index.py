@@ -106,6 +106,74 @@ def _check_auth(request: Request) -> None:
 _MAX_BILL_UPLOAD_BYTES = 4 * 1024 * 1024
 
 
+def _supplier_import_auto_pipeline_enabled() -> bool:
+    v = (os.environ.get("SUPPLIER_IMPORT_AUTO_PIPELINE") or "1").strip().lower()
+    return v not in ("0", "false", "no", "off")
+
+
+def _pipeline_after_import() -> dict[str, object]:
+    """
+    Po importe BillDetail spusti celý pipeline (predvolene zapnuté).
+    Pri SUPPLIER_COSTS_FROM_CSV=1 nespúšťaj — pipeline by nečítal nové náklady zo Sheet.
+    """
+    out: dict[str, object] = {
+        "pipeline_ran": False,
+        "pipeline_ok": None,
+        "pipeline_exit_code": None,
+        "pipeline_error": None,
+        "pipeline_skipped_reason": None,
+    }
+    if not _supplier_import_auto_pipeline_enabled():
+        out["pipeline_skipped_reason"] = "auto_pipeline_disabled"
+        return out
+    from config import load_settings
+
+    settings = load_settings()
+    if not settings.supplier_costs_sheet_tab:
+        out["pipeline_skipped_reason"] = "SUPPLIER_COSTS_FROM_CSV"
+        return out
+    try:
+        from pipeline import main
+
+        code = main()
+        out["pipeline_ran"] = True
+        out["pipeline_exit_code"] = code
+        out["pipeline_ok"] = code == 0
+        return out
+    except Exception as exc:
+        logger.exception("Pipeline after supplier import failed")
+        out["pipeline_ran"] = True
+        out["pipeline_ok"] = False
+        out["pipeline_error"] = str(exc)
+        return out
+
+
+def _pipeline_after_import_html_lines(pipe: dict[str, object]) -> list[str]:
+    lines: list[str] = []
+    reason = pipe.get("pipeline_skipped_reason")
+    if reason == "auto_pipeline_disabled":
+        lines.append("")
+        lines.append("Automatický report je vypnutý (SUPPLIER_IMPORT_AUTO_PIPELINE=0).")
+    elif reason == "SUPPLIER_COSTS_FROM_CSV":
+        lines.append("")
+        lines.append(
+            "Automatický report sa preskočil: máš SUPPLIER_COSTS_FROM_CSV=1 — pipeline číta CSV, nie záložku v Sheet. "
+            "Vypni SUPPLIER_COSTS_FROM_CSV na Verceli, aby sa po nahratí použili nové náklady."
+        )
+    elif pipe.get("pipeline_ran"):
+        lines.append("")
+        lines.append("---")
+        if pipe.get("pipeline_ok"):
+            lines.append("Report (Shopify + Meta → všetky záložky) bol úspešne aktualizovaný.")
+        elif pipe.get("pipeline_error"):
+            lines.append(f"Report zlyhal (náklady sú už v Sheet): {pipe['pipeline_error']}")
+        else:
+            lines.append(
+                f"Report: pipeline skončil s kódom {pipe.get('pipeline_exit_code')}. Skús spustiť znova z Domov."
+            )
+    return lines
+
+
 async def _run_supplier_bill_import(file: UploadFile) -> dict[str, object]:
     """Parse BillDetail file and overwrite supplier costs worksheet. Raises HTTPException."""
     from config import DEFAULT_SUPPLIER_COSTS_SHEET_TAB, load_settings
@@ -282,16 +350,21 @@ async def supplier_import_submit(
             back_href="/app/naklady",
         )
         return HTMLResponse(body, status_code=exc.status_code)
+    pipe = _pipeline_after_import()
     lines = [
         f"Hotovo. Zapísaných produktov: {result['rows']}",
         f"Záložka: {result['tab']}",
         f"Tabuľka: {result['spreadsheet']}",
     ]
+    lines.extend(_pipeline_after_import_html_lines(pipe))
+    pipeline_failed = bool(
+        pipe.get("pipeline_ran") and pipe.get("pipeline_ok") is False
+    )
     body = ui.page_message(
-        ok=True,
-        title="Náklady doplnené",
-        message="\n".join(lines),
-        back_href="/app/naklady",
+        ok=not pipeline_failed,
+        title="Import a report",
+        message="\n".join(lines).strip(),
+        back_href="/app",
     )
     return HTMLResponse(body, status_code=200)
 
@@ -312,4 +385,12 @@ async def import_bill_detail(
         result = await _run_supplier_bill_import(file)
     except HTTPException:
         raise
-    return JSONResponse(status_code=200, content=result)
+    pipe = _pipeline_after_import()
+    payload = {**result, **pipe}
+    pipeline_failed = bool(
+        pipe.get("pipeline_ran") and pipe.get("pipeline_ok") is False
+    )
+    return JSONResponse(
+        status_code=500 if pipeline_failed else 200,
+        content=payload,
+    )

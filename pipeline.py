@@ -10,10 +10,12 @@ import pandas as pd
 
 from config import load_settings
 from costs import load_cost_maps
+from data_quality import build_missing_supplier_costs_report, log_missing_supplier_costs
 from meta_ads import fetch_meta_campaign_insights, fetch_meta_daily_spend
 from shopify_client import fetch_order_line_rows
-from sheets import pause_between_sheet_uploads, upload_dataframe
+from sheets import pause_between_sheet_uploads, replace_worksheet_simple, upload_dataframe
 from transform import (
+    bookkeeping_monthly_from_daily,
     daily_summary_from_orders,
     daily_summary_usd_primary,
     enrich_line_items,
@@ -38,6 +40,7 @@ SHEET_ORDER_LEVEL = os.getenv("SHEET_TAB_ORDER_LEVEL", "ORDER_LEVEL").strip()
 SHEET_META_DATA = os.getenv("SHEET_TAB_META_DATA", "META_DATA").strip()
 SHEET_META_CAMPAIGNS = os.getenv("SHEET_TAB_META_CAMPAIGNS", "META_CAMPAIGNS").strip()
 SHEET_DAILY = os.getenv("SHEET_TAB_DAILY_SUMMARY", "DAILY_SUMMARY").strip()
+SHEET_BOOKKEEPING = os.getenv("SHEET_TAB_BOOKKEEPING", "BOOKKEEPING").strip()
 
 _META_CAMPAIGN_COLUMNS = [
     "Date",
@@ -147,9 +150,24 @@ def main() -> int:
         if settings.daily_summary_usd_primary:
             daily_final = daily_summary_usd_primary(daily_final)
 
+        bookkeeping_df = bookkeeping_monthly_from_daily(daily_final)
+
         phase = "sheets"
         _sheet_target = settings.google_sheet_id or settings.google_sheet_name
         logger.info("Uploading to Google Sheets %r …", _sheet_target)
+        missing_cost_df = build_missing_supplier_costs_report(orders_df)
+        log_missing_supplier_costs(
+            orders_df,
+            missing_cost_df,
+            sheet_tab=settings.missing_supplier_costs_tab,
+        )
+        if settings.missing_supplier_costs_tab:
+            replace_worksheet_simple(
+                settings,
+                settings.missing_supplier_costs_tab,
+                missing_cost_df,
+            )
+            pause_between_sheet_uploads()
         upload_dataframe(settings, orders_df, SHEET_ORDERS_DB, layout_kind="orders")
         pause_between_sheet_uploads()
         upload_dataframe(settings, order_df, SHEET_ORDER_LEVEL, layout_kind="order_level")
@@ -165,14 +183,22 @@ def main() -> int:
             )
             pause_between_sheet_uploads()
         upload_dataframe(settings, daily_final, SHEET_DAILY, layout_kind="daily")
+        pause_between_sheet_uploads()
+        upload_dataframe(
+            settings,
+            bookkeeping_df,
+            SHEET_BOOKKEEPING,
+            layout_kind="bookkeeping",
+        )
 
         logger.info(
-            "Done. Line rows=%s, order rows=%s, meta days=%s, campaign rows=%s, daily rows=%s",
+            "Done. Line rows=%s, order rows=%s, meta days=%s, campaign rows=%s, daily rows=%s, bookkeeping months=%s",
             len(orders_df),
             len(order_df),
             len(meta_df),
             len(meta_campaign_df),
             len(daily_final),
+            len(bookkeeping_df),
         )
         return 0
     except Exception as exc:

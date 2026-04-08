@@ -8,7 +8,7 @@ import pandas as pd
 
 from config import Settings
 
-SheetKind = Literal["orders", "order_level", "meta", "meta_campaigns", "daily"]
+SheetKind = Literal["orders", "order_level", "meta", "meta_campaigns", "daily", "bookkeeping"]
 
 # Summary rows need enough columns; narrow dataframes (e.g. META_DATA with 3 cols) would otherwise
 # truncate _pad(..., row) and drop trailing cells (including local-currency totals).
@@ -274,7 +274,7 @@ def sheet_values_with_summary(
         else:
             summary.append(_pad(width, [""]))
 
-    else:  # daily
+    elif kind == "daily":
         usd_only = settings.daily_summary_usd_primary and "Net_Profit" in df.columns
         n = len(df)
         rev = float(df["Revenue"].sum()) if "Revenue" in df.columns else 0.0
@@ -392,6 +392,71 @@ def sheet_values_with_summary(
                         ],
                     )
                 )
+
+    elif kind == "bookkeeping":
+        n = len(df)
+        rev = float(df["Sales_Revenue"].sum()) if "Sales_Revenue" in df.columns else 0.0
+        cogs = float(df["COGS"].sum()) if "COGS" in df.columns else 0.0
+        gp = float(df["Gross_Profit"].sum()) if "Gross_Profit" in df.columns else 0.0
+        mkt = float(df["Marketing_Spend"].sum()) if "Marketing_Spend" in df.columns else 0.0
+        net = float(df["Net_Profit"].sum()) if "Net_Profit" in df.columns else 0.0
+        cur = settings.report_currency.strip() or "—"
+        rate = settings.usd_per_local
+        rate_s = f"{rate:.6g}" if rate else "—"
+        usd_note = (
+            "Sumy v USD (DAILY_SUMMARY režim USD_PER_LOCAL_UNIT)."
+            if settings.daily_summary_usd_primary and rate
+            else f"Sumy v mene obchodu ({cur}); Meta merge používa rovnakú bázu ako DAILY_SUMMARY."
+        )
+        summary.append(
+            _pad(
+                width,
+                [
+                    "📒 Bookkeeping — mesačný P&L (management reporting)",
+                    usd_note,
+                    "Nie je to účtovná závierka: chýbajú napr. dane, poplatky brány, odpisy, ostatné OPEX.",
+                    f"Detail objednávok: ORDER_LEVEL · položky: ORDERS_DB · REPORT_CURRENCY={cur} · USD/1={rate_s}",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+            )
+        )
+        summary.append(
+            _pad(
+                width,
+                [
+                    "Súčty (všetky mesiace v tabuľke)",
+                    f"Mesačných riadkov: {n}",
+                    "Sales_Revenue",
+                    round(rev, 2),
+                    "COGS",
+                    round(cogs, 2),
+                    "Gross_Profit",
+                    round(gp, 2),
+                ],
+            )
+        )
+        summary.append(
+            _pad(
+                width,
+                [
+                    "Marketing_Spend",
+                    round(mkt, 2),
+                    "Net_Profit",
+                    round(net, 2),
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+            )
+        )
+        summary.append(_pad(width, [""]))
+
+    else:
+        raise ValueError(f"Unknown sheet layout kind: {kind!r}")
 
     summary.append(_pad(width, [""] * width))
     header_row_index = len(summary) + 1

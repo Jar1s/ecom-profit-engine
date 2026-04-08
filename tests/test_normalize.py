@@ -26,6 +26,17 @@ class TestNormalize(unittest.TestCase):
         self.assertEqual(levels[0], n)
         self.assertIn("livia | poncho", levels)
 
+    def test_unicode_dash_variants_share_family_base(self) -> None:
+        beige = normalize_product_name("Livia | Oversize-Poncho-Pullover - Beige / XL")
+        rose_ascii = normalize_product_name("Livia | Oversize-Poncho-Pullover - Rose / 2XL")
+        rose_endash = normalize_product_name(
+            "Livia | Oversize-Poncho-Pullover – Rose / 2XL"
+        )  # en dash U+2013
+        base = "livia | oversize-poncho-pullover"
+        self.assertIn(base, product_title_family_levels(beige))
+        self.assertIn(base, product_title_family_levels(rose_ascii))
+        self.assertIn(base, product_title_family_levels(rose_endash))
+
 
 if __name__ == "__main__":
     unittest.main()

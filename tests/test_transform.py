@@ -7,6 +7,7 @@ import pandas as pd
 from costs import CostMaps, build_product_lineage_index
 from normalize import normalize_product_name
 from transform import (
+    bookkeeping_monthly_from_daily,
     daily_summary_from_orders,
     daily_summary_usd_primary,
     enrich_line_items,
@@ -237,6 +238,43 @@ class TestTransform(unittest.TestCase):
         self.assertEqual(out.loc[0, "Product_Cost"], 26.0)
         self.assertEqual(out.loc[0, "Net_Profit"], 22.75)
         self.assertEqual(out.loc[0, "Marketing_ROAS"], round(65.0 / 16.25, 4))
+
+    def test_bookkeeping_monthly_from_daily(self) -> None:
+        daily = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-01-15",
+                    "Revenue": 100.0,
+                    "Product_Cost": 40.0,
+                    "Gross_Profit": 60.0,
+                    "Ad_Spend": 10.0,
+                },
+                {
+                    "Date": "2026-01-20",
+                    "Revenue": 50.0,
+                    "Product_Cost": 20.0,
+                    "Gross_Profit": 30.0,
+                    "Ad_Spend": 5.0,
+                },
+                {
+                    "Date": "2026-02-01",
+                    "Revenue": 200.0,
+                    "Product_Cost": 80.0,
+                    "Gross_Profit": 120.0,
+                    "Ad_Spend": 0.0,
+                },
+            ]
+        )
+        b = bookkeeping_monthly_from_daily(daily)
+        self.assertEqual(len(b), 2)
+        jan = b[b["Month"] == "2026-01"].iloc[0]
+        self.assertEqual(jan["Sales_Revenue"], 150.0)
+        self.assertEqual(jan["COGS"], 60.0)
+        self.assertEqual(jan["Gross_Profit"], 90.0)
+        self.assertEqual(jan["Marketing_Spend"], 15.0)
+        self.assertEqual(jan["Net_Profit"], 75.0)
+        feb = b[b["Month"] == "2026-02"].iloc[0]
+        self.assertEqual(feb["Net_Profit"], 120.0)
 
 
 if __name__ == "__main__":

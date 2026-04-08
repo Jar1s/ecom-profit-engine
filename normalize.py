@@ -12,7 +12,15 @@ def normalize_product_name(name: str) -> str:
     """Trim, collapse whitespace, casefold for case-insensitive lookup."""
     if not name:
         return ""
-    s = name.strip()
+    s = str(name).strip()
+    # NBSP and thin spaces → regular space before collapse
+    s = s.replace("\u00a0", " ").replace("\u2009", " ").replace("\u202f", " ")
+    # Shopify/CMS often use en/em dash instead of " - " between model name and color (Rose vs Beige)
+    s = re.sub(r"\s+[–—−]\s+", " - ", s)
+    # Tight: Pullover–Rose / Pullover– Rose (unicode dash)
+    s = re.sub(r"([^\s])[–—−]([^\s])", r"\1 - \2", s)
+    s = re.sub(r"([^\s])[–—−]\s+", r"\1 - ", s)
+    s = re.sub(r"\s+[–—−]([^\s])", r" - \1", s)
     s = _MULTI_SPACE.sub(" ", s)
     return s.casefold()
 

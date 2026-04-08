@@ -65,6 +65,7 @@ class Settings:
     supplier_bill_single_orders_tab: str | None  # BillDetail one-line orders → match by order #; empty = off
     learn_costs_from_orders_sheet: bool  # Median unit cost from last ORDERS_DB when supplier row missing
     item_catalog_sheet_tab: str | None  # ITEM_CATALOG: SKU_Prefix → UnitCost (same price for color variants)
+    missing_supplier_costs_tab: str | None  # Report tab: line items with Product_Cost=0; empty = off
 
 
 def _require(name: str) -> str:
@@ -112,6 +113,11 @@ def _supplier_bill_single_orders_tab() -> str | None:
 
 def _item_catalog_sheet_tab() -> str | None:
     s = os.getenv("ITEM_CATALOG_SHEET_TAB", "ITEM_CATALOG").strip()
+    return s if s else None
+
+
+def _missing_supplier_costs_tab() -> str | None:
+    s = os.getenv("MISSING_SUPPLIER_COSTS_TAB", "MISSING_SUPPLIER_COSTS").strip()
     return s if s else None
 
 
@@ -293,4 +299,5 @@ def load_settings() -> Settings:
         supplier_bill_single_orders_tab=_supplier_bill_single_orders_tab(),
         learn_costs_from_orders_sheet=_env_bool("LEARN_COSTS_FROM_ORDERS_SHEET", False),
         item_catalog_sheet_tab=_item_catalog_sheet_tab(),
+        missing_supplier_costs_tab=_missing_supplier_costs_tab(),
     )

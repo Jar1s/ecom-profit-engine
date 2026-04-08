@@ -121,6 +121,59 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
+def bookkeeping_monthly_from_daily(daily_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Monthly management P&L rollup for a **BOOKKEEPING** sheet (not statutory accounts).
+
+    Input is the same frame as **DAILY_SUMMARY** after Meta merge (and optional
+    ``daily_summary_usd_primary``): at least ``Date``, ``Revenue``, ``Product_Cost``,
+    ``Gross_Profit``, optionally ``Ad_Spend``.
+    """
+    empty_cols = [
+        "Month",
+        "Sales_Revenue",
+        "COGS",
+        "Gross_Profit",
+        "Marketing_Spend",
+        "Net_Profit",
+    ]
+    if daily_df.empty:
+        return pd.DataFrame(columns=empty_cols)
+    if "Date" not in daily_df.columns:
+        return pd.DataFrame(columns=empty_cols)
+
+    d = daily_df.copy()
+    d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+    d = d.dropna(subset=["Date"])
+    if d.empty:
+        return pd.DataFrame(columns=empty_cols)
+
+    d["Month"] = d["Date"].dt.to_period("M").astype(str)
+
+    agg: dict[str, Any] = {}
+    for col in ("Revenue", "Product_Cost", "Gross_Profit"):
+        if col in d.columns:
+            agg[col] = "sum"
+    if "Ad_Spend" in d.columns:
+        agg["Ad_Spend"] = "sum"
+
+    if not agg:
+        return pd.DataFrame(columns=empty_cols)
+
+    g = d.groupby("Month", as_index=False).agg(agg)
+    g["Sales_Revenue"] = pd.to_numeric(g["Revenue"], errors="coerce").fillna(0.0).round(2)
+    g["COGS"] = pd.to_numeric(g["Product_Cost"], errors="coerce").fillna(0.0).round(2)
+    g["Gross_Profit"] = pd.to_numeric(g["Gross_Profit"], errors="coerce").fillna(0.0).round(2)
+    if "Ad_Spend" in g.columns:
+        g["Marketing_Spend"] = pd.to_numeric(g["Ad_Spend"], errors="coerce").fillna(0.0).round(2)
+    else:
+        g["Marketing_Spend"] = 0.0
+    g["Net_Profit"] = (g["Gross_Profit"] - g["Marketing_Spend"]).round(2)
+
+    out = g[empty_cols].copy()
+    return out.sort_values("Month").reset_index(drop=True)
+
+
 def daily_summary_from_orders(df: pd.DataFrame) -> pd.DataFrame:
     """Daily totals from line-level data."""
     if df.empty:

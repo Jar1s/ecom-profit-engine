@@ -277,7 +277,7 @@ def apply_data_conditional_formatting(
     requests: list[dict[str, Any]] = []
 
     gp = _col_index(columns, "Gross_Profit")
-    if gp is not None and layout_kind in ("orders", "order_level", "daily"):
+    if gp is not None and layout_kind in ("orders", "order_level", "daily", "bookkeeping"):
         requests.append(
             {
                 "addConditionalFormatRule": {
@@ -297,7 +297,7 @@ def apply_data_conditional_formatting(
         )
 
     net_i = _col_index(columns, "Net_Profit")
-    if net_i is not None and layout_kind == "daily":
+    if net_i is not None and layout_kind in ("daily", "bookkeeping"):
         requests.append(
             {
                 "addConditionalFormatRule": {

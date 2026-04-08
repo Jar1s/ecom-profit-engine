@@ -30,7 +30,7 @@ def main() -> None:
         "--output",
         type=Path,
         default=_ROOT / "data" / "supplier_costs.csv",
-        help="Output CSV path (Product, Cost)",
+        help="Output CSV path (Product, Cost, SKU)",
     )
     ap.add_argument(
         "--dry-run",

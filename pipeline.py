@@ -9,7 +9,7 @@ import sys
 import pandas as pd
 
 from config import load_settings
-from costs import load_cost_map
+from costs import load_cost_maps
 from meta_ads import fetch_meta_campaign_insights, fetch_meta_daily_spend
 from shopify_client import fetch_order_line_rows
 from sheets import pause_between_sheet_uploads, upload_dataframe
@@ -68,8 +68,17 @@ def main() -> int:
     phase = "supplier_costs"
     try:
         logger.info("Loading supplier costs from %s", settings.supplier_csv_path)
-        cost_map = load_cost_map(settings)
-        logger.info("pipeline_phase=%s_ok keys=%s", phase, len(cost_map))
+        cost_maps = load_cost_maps(settings)
+        logger.info(
+            "pipeline_phase=%s_ok product_keys=%s sku_keys=%s sku_prefix_rules=%s "
+            "order_single=%s learned=%s",
+            phase,
+            len(cost_maps.by_product),
+            len(cost_maps.by_sku),
+            len(cost_maps.sku_prefix_rules),
+            len(cost_maps.by_order_single),
+            len(cost_maps.learned_by_product_sku),
+        )
 
         phase = "shopify"
         logger.info("Fetching Shopify orders …")
@@ -79,7 +88,7 @@ def main() -> int:
         phase = "enrich"
         logger.info("Enriching line items with costs …")
         orders_df = enrich_usd_columns(
-            enrich_line_items(line_rows, cost_map),
+            enrich_line_items(line_rows, cost_maps),
             settings.usd_per_local,
         )
 

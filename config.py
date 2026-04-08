@@ -62,6 +62,9 @@ class Settings:
     sheets_conditional_format: bool
     sheets_roas_warn_below: float | None  # None = do not highlight Marketing_ROAS
     daily_summary_usd_primary: bool  # DAILY_SUMMARY: only USD columns + Net_Profit (no duplicate AUD)
+    supplier_bill_single_orders_tab: str | None  # BillDetail one-line orders → match by order #; empty = off
+    learn_costs_from_orders_sheet: bool  # Median unit cost from last ORDERS_DB when supplier row missing
+    item_catalog_sheet_tab: str | None  # ITEM_CATALOG: SKU_Prefix → UnitCost (same price for color variants)
 
 
 def _require(name: str) -> str:
@@ -100,6 +103,16 @@ def _meta_purchase_action_types() -> tuple[str, ...]:
         "omni_purchase",
         "onsite_conversion.purchase",
     )
+
+
+def _supplier_bill_single_orders_tab() -> str | None:
+    s = os.getenv("SUPPLIER_BILL_SINGLE_ORDERS_TAB", "SUPPLIER_BILL_SINGLE_ORDERS").strip()
+    return s if s else None
+
+
+def _item_catalog_sheet_tab() -> str | None:
+    s = os.getenv("ITEM_CATALOG_SHEET_TAB", "ITEM_CATALOG").strip()
+    return s if s else None
 
 
 def _sheets_roas_warn_below() -> float | None:
@@ -277,4 +290,7 @@ def load_settings() -> Settings:
         sheets_conditional_format=_env_bool("SHEETS_CONDITIONAL_FORMAT", True),
         sheets_roas_warn_below=_sheets_roas_warn_below(),
         daily_summary_usd_primary=_env_bool("DAILY_SUMMARY_USD_PRIMARY", True),
+        supplier_bill_single_orders_tab=_supplier_bill_single_orders_tab(),
+        learn_costs_from_orders_sheet=_env_bool("LEARN_COSTS_FROM_ORDERS_SHEET", False),
+        item_catalog_sheet_tab=_item_catalog_sheet_tab(),
     )

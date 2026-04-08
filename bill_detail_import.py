@@ -8,7 +8,7 @@ from collections import defaultdict
 
 import pandas as pd
 
-from normalize import normalize_product_name
+from normalize import normalize_order_number, normalize_product_name
 
 # One line item: «SKU,Title…:qty(unitOrLinePrice)» — title may contain commas.
 _SEGMENT = re.compile(
@@ -36,23 +36,24 @@ def find_bill_detail_columns(df: pd.DataFrame) -> tuple[str, str]:
     return pi, am
 
 
-def _parse_segment(segment: str) -> tuple[str, float] | None:
+def _parse_segment(segment: str) -> tuple[str, str, float] | None:
     m = _SEGMENT.match(segment.strip())
     if not m:
         return None
-    _sku, title, qty_s, price_s = m.groups()
+    sku_s, title, qty_s, price_s = m.groups()
     qty = max(1, int(qty_s))
     try:
         line_or_unit = float(price_s)
     except (TypeError, ValueError):
         line_or_unit = 0.0
     unit = line_or_unit / qty
-    return title.strip(), round(unit, 4)
+    return (sku_s.strip(), title.strip(), round(unit, 4))
 
 
-def iter_parsed_lines(
+def iter_parsed_segments(
     product_info: str, row_amount: float | None
-) -> list[tuple[str, float]]:
+) -> list[tuple[str, str, float]]:
+    """Each tuple is (supplier_sku, product_title, unit_cost)."""
     if product_info is None or (
         isinstance(product_info, float) and pd.isna(product_info)
     ):
@@ -68,7 +69,7 @@ def iter_parsed_lines(
     m2 = _SEGMENT.match(s)
     if not m2:
         return []
-    _sku, title, qty_s, price_s = m2.groups()
+    sku_s, title, qty_s, price_s = m2.groups()
     qty = max(1, int(qty_s))
     try:
         p = float(price_s)
@@ -79,7 +80,7 @@ def iter_parsed_lines(
     except (TypeError, ValueError):
         amt = 0.0
     unit = p / qty if p else (amt / qty if amt else 0.0)
-    return [(title.strip(), round(unit, 4))]
+    return [(sku_s.strip(), title.strip(), round(unit, 4))]
 
 
 def read_bill_detail_sheet(content: bytes, filename: str) -> pd.DataFrame:
@@ -96,10 +97,11 @@ def read_bill_detail_sheet(content: bytes, filename: str) -> pd.DataFrame:
 
 
 def bill_detail_dataframe_to_supplier_costs(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate BillDetail rows to unique Product + median Cost."""
+    """Aggregate BillDetail rows to unique Product + median Cost + supplier SKU (for Shopify match)."""
     pi_col, am_col = find_bill_detail_columns(df)
     costs_by_norm: dict[str, list[float]] = defaultdict(list)
     display_by_norm: dict[str, str] = {}
+    sku_by_norm: dict[str, str] = {}
 
     for _, row in df.iterrows():
         raw_am = row.get(am_col)
@@ -109,20 +111,66 @@ def bill_detail_dataframe_to_supplier_costs(df: pd.DataFrame) -> pd.DataFrame:
             )
         except (TypeError, ValueError):
             row_amount = None
-        for title, unit in iter_parsed_lines(row.get(pi_col), row_amount):
+        for sku, title, unit in iter_parsed_segments(row.get(pi_col), row_amount):
             key = normalize_product_name(title)
             if not key:
                 continue
             costs_by_norm[key].append(unit)
             display_by_norm.setdefault(key, title)
+            if sku and key not in sku_by_norm:
+                sku_by_norm[key] = sku
 
-    rows: list[tuple[str, float]] = []
+    rows: list[tuple[str, float, str]] = []
     for key in sorted(costs_by_norm.keys()):
         vals = sorted(costs_by_norm[key])
         mid = vals[len(vals) // 2]
-        rows.append((display_by_norm[key], round(mid, 2)))
+        rows.append((display_by_norm[key], round(mid, 2), sku_by_norm.get(key, "")))
 
-    return pd.DataFrame(rows, columns=["Product", "Cost"])
+    return pd.DataFrame(rows, columns=["Product", "Cost", "SKU"])
+
+
+def bill_detail_single_item_order_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Rows derived from BillDetail where ``ProductInfo`` parses to exactly one segment
+    (one physical line on the supplier bill). Used with Shopify when that order has
+    a single line item: match by order number even if titles differ.
+    Columns: OrderNo (digits only), UnitCost, SKU, SupplierTitle.
+    """
+    col_lower = {str(c).strip().lower(): c for c in df.columns}
+    on_col = col_lower.get("orderno") or col_lower.get("order_no")
+    empty = pd.DataFrame(columns=["OrderNo", "UnitCost", "SKU", "SupplierTitle"])
+    if not on_col:
+        return empty
+    try:
+        pi_col, am_col = find_bill_detail_columns(df)
+    except ValueError:
+        return empty
+
+    rows_out: list[dict[str, object]] = []
+    for _, row in df.iterrows():
+        raw_am = row.get(am_col)
+        try:
+            row_amount = (
+                float(raw_am) if raw_am is not None and str(raw_am) != "nan" else None
+            )
+        except (TypeError, ValueError):
+            row_amount = None
+        segs = iter_parsed_segments(row.get(pi_col), row_amount)
+        if len(segs) != 1:
+            continue
+        sku, title, unit = segs[0]
+        ok = normalize_order_number(row.get(on_col))
+        if not ok:
+            continue
+        rows_out.append(
+            {
+                "OrderNo": ok,
+                "UnitCost": round(float(unit), 2),
+                "SKU": sku,
+                "SupplierTitle": title,
+            }
+        )
+    return pd.DataFrame(rows_out)
 
 
 def bill_detail_bytes_to_supplier_costs_df(content: bytes, filename: str) -> pd.DataFrame:

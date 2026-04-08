@@ -77,6 +77,7 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 unit_price = 0.0
             revenue = round(unit_price * qty, 2)
 
+            sku = str(item.get("sku") or "").strip()
             rows.append(
                 {
                     "Date": date_str,
@@ -84,6 +85,7 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "Order_ID": order_id,
                     "Line_Item_ID": line_id,
                     "Product": title,
+                    "SKU": sku,
                     "Quantity": qty,
                     "Revenue": revenue,
                 }

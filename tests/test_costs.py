@@ -18,17 +18,30 @@ class TestCosts(unittest.TestCase):
             path = Path(f.name)
         try:
             m = load_cost_map_from_path(path)
-            self.assertEqual(m.get("widget x"), 2.5)
+            self.assertEqual(m.by_product.get("widget x"), 2.5)
+            self.assertEqual(m.by_sku, {})
         finally:
             path.unlink(missing_ok=True)
 
     def test_dataframe_product_cost_columns(self) -> None:
-        from costs import _cost_map_from_dataframe
+        from costs import _cost_maps_from_dataframe
 
         df = pd.DataFrame([{"Product": "A", "Cost": 1.0}, {"Product": "B", "Cost": 2.0}])
-        m = _cost_map_from_dataframe(df, source="test")
-        self.assertEqual(m["a"], 1.0)
-        self.assertEqual(m["b"], 2.0)
+        m = _cost_maps_from_dataframe(df, source="test")
+        self.assertEqual(m.by_product["a"], 1.0)
+        self.assertEqual(m.by_product["b"], 2.0)
+        self.assertEqual(m.by_sku, {})
+
+    def test_dataframe_sku_column(self) -> None:
+        from costs import _cost_maps_from_dataframe
+
+        df = pd.DataFrame(
+            [
+                {"Product": "Ignored title", "Cost": 9.0, "SKU": "SKU-1"},
+            ]
+        )
+        m = _cost_maps_from_dataframe(df, source="test")
+        self.assertEqual(m.by_sku["SKU-1"], 9.0)
 
 
 if __name__ == "__main__":

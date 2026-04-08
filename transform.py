@@ -8,15 +8,57 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from normalize import normalize_product_name
+from costs import CostMaps, build_product_lineage_index
+from normalize import (
+    normalize_order_number,
+    normalize_product_name,
+    normalize_sku,
+    product_title_family_levels,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def enrich_line_items(rows: list[dict[str, Any]], cost_map: dict[str, float]) -> pd.DataFrame:
+def _line_unit_cost(
+    row: pd.Series,
+    cost_maps: CostMaps,
+    *,
+    order_counts: dict[str, int],
+    lineage_map: dict[str, float],
+) -> float:
+    k = row["Product_Normalized"]
+    for cand in product_title_family_levels(k):
+        pl = lineage_map.get(cand)
+        if pl is not None and pl > 0:
+            return float(pl)
+    sku_raw = str(row.get("SKU") or "").strip()
+    sk = normalize_sku(sku_raw)
+    if sk:
+        uc = cost_maps.by_sku.get(sk)
+        if uc is not None:
+            return float(uc)
+        for prefix, cost in cost_maps.sku_prefix_rules:
+            if sk.startswith(prefix):
+                return float(cost)
+    ord_name = str(row.get("Order") or "").strip()
+    if ord_name and order_counts.get(ord_name, 0) == 1:
+        on = normalize_order_number(ord_name)
+        if on:
+            uo = cost_maps.by_order_single.get(on)
+            if uo is not None and uo > 0:
+                return float(uo)
+    lc = cost_maps.learned_by_product_sku
+    if (k, sk) in lc:
+        return float(lc[(k, sk)])
+    if (k, "") in lc:
+        return float(lc[(k, "")])
+    return 0.0
+
+
+def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.DataFrame:
     """
-    Unit cost from CSV is per unit; line COGS = unit_cost * Quantity.
-    Missing cost maps to 0 for unit cost (PRD).
+    Unit cost resolution order: product title (vrátane „rovnaký model, iná farba“ cez odseknuté
+    koncovky `` - …``) → presné SKU → ITEM_CATALOG prefix → jednopoložková objednávka → learned ORDERS_DB.
     """
     df = pd.DataFrame(rows)
     if df.empty:
@@ -27,6 +69,7 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_map: dict[str, float]) ->
                 "Order_ID",
                 "Line_Item_ID",
                 "Product",
+                "SKU",
                 "Quantity",
                 "Revenue",
                 "Product_Cost",
@@ -34,8 +77,22 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_map: dict[str, float]) ->
             ]
         )
 
+    if "SKU" not in df.columns:
+        df["SKU"] = ""
     df["Product_Normalized"] = df["Product"].astype(str).map(normalize_product_name)
-    unit_cost = df["Product_Normalized"].map(cost_map).fillna(0).astype(float)
+    order_counts = df.groupby(df["Order"].astype(str), sort=False).size().to_dict()
+    lineage_map = cost_maps.by_product_lineage
+    if not lineage_map and cost_maps.by_product:
+        lineage_map = build_product_lineage_index(cost_maps.by_product)
+    unit_cost = df.apply(
+        lambda r: _line_unit_cost(
+            r,
+            cost_maps,
+            order_counts=order_counts,
+            lineage_map=lineage_map,
+        ),
+        axis=1,
+    ).astype(float)
     qty = df["Quantity"].astype(float) if "Quantity" in df.columns else pd.Series(1.0, index=df.index)
     df["Product_Cost"] = (unit_cost * qty).round(2)
     df["Gross_Profit"] = (df["Revenue"].astype(float) - df["Product_Cost"]).round(2)

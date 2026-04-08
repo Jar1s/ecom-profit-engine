@@ -4,6 +4,8 @@ import unittest
 
 import pandas as pd
 
+from costs import CostMaps, build_product_lineage_index
+from normalize import normalize_product_name
 from transform import (
     daily_summary_from_orders,
     daily_summary_usd_primary,
@@ -28,11 +30,125 @@ class TestTransform(unittest.TestCase):
                 "Revenue": 40.0,
             }
         ]
-        cost_map = {"widget": 15.0}
-        df = enrich_line_items(rows, cost_map)
+        cost_maps = CostMaps(by_product={"widget": 15.0}, by_sku={})
+        df = enrich_line_items(rows, cost_maps)
         self.assertEqual(len(df), 1)
         self.assertEqual(df.loc[0, "Product_Cost"], 30.0)
         self.assertEqual(df.loc[0, "Gross_Profit"], 10.0)
+
+    def test_enrich_line_items_matches_supplier_sku(self) -> None:
+        rows = [
+            {
+                "Date": "2026-04-01",
+                "Order": "#1001",
+                "Order_ID": 1,
+                "Line_Item_ID": 10,
+                "Product": "Short title from Shopify",
+                "SKU": "FCGP42825.27",
+                "Quantity": 1,
+                "Revenue": 77.95,
+            }
+        ]
+        cost_maps = CostMaps(
+            by_product={},
+            by_sku={"FCGP42825.27": 22.9},
+        )
+        df = enrich_line_items(rows, cost_maps)
+        self.assertEqual(df.loc[0, "Product_Cost"], 22.9)
+
+    def test_enrich_line_items_sku_prefix_same_model_other_color(self) -> None:
+        """ITEM_CATALOG style: one wholesale row for FCGP42825 covers all FCGP42825.* variants."""
+        rows = [
+            {
+                "Date": "2026-04-01",
+                "Order": "#1",
+                "Order_ID": 1,
+                "Line_Item_ID": 10,
+                "Product": "Pullover - Navy",
+                "SKU": "FCGP42825.32",
+                "Quantity": 1,
+                "Revenue": 80.0,
+            }
+        ]
+        cost_maps = CostMaps(
+            by_product={},
+            by_sku={},
+            sku_prefix_rules=(("FCGP42825", 22.9),),
+            by_product_lineage={},
+        )
+        df = enrich_line_items(rows, cost_maps)
+        self.assertEqual(df.loc[0, "Product_Cost"], 22.9)
+
+    def test_enrich_line_items_single_item_order_from_billdetail(self) -> None:
+        """One Shopify line + BillDetail row with only that order's single segment."""
+        rows = [
+            {
+                "Date": "2026-04-01",
+                "Order": "#1053",
+                "Order_ID": 1,
+                "Line_Item_ID": 10,
+                "Product": "Marketing title differs from supplier",
+                "SKU": "",
+                "Quantity": 1,
+                "Revenue": 99.0,
+            }
+        ]
+        cost_maps = CostMaps(
+            by_product={},
+            by_sku={},
+            by_order_single={"1053": 24.8},
+        )
+        df = enrich_line_items(rows, cost_maps)
+        self.assertEqual(df.loc[0, "Product_Cost"], 24.8)
+
+    def test_enrich_line_items_same_model_other_color_title(self) -> None:
+        """Import má len „beige“ variant; Shopify predá „navy“ — spoločný základ názvu."""
+        rows = [
+            {
+                "Date": "2026-04-01",
+                "Order": "#1",
+                "Order_ID": 1,
+                "Line_Item_ID": 10,
+                "Product": "Livia | Oversize-Poncho-Pullover - Navy / L",
+                "SKU": "",
+                "Quantity": 1,
+                "Revenue": 80.0,
+            }
+        ]
+        bp = {
+            normalize_product_name(
+                "Livia | Oversize-Poncho-Pullover - Beige / L"
+            ): 22.9,
+        }
+        cost_maps = CostMaps(
+            by_product=bp,
+            by_sku={},
+            by_product_lineage=build_product_lineage_index(bp),
+        )
+        df = enrich_line_items(rows, cost_maps)
+        self.assertEqual(df.loc[0, "Product_Cost"], 22.9)
+
+    def test_enrich_line_items_learned_from_orders_sheet(self) -> None:
+        rows = [
+            {
+                "Date": "2026-04-01",
+                "Order": "#1",
+                "Order_ID": 1,
+                "Line_Item_ID": 10,
+                "Product": "Mystery product",
+                "SKU": "SKU-99",
+                "Quantity": 1,
+                "Revenue": 50.0,
+            }
+        ]
+        cost_maps = CostMaps(
+            by_product={},
+            by_sku={},
+            learned_by_product_sku={("mystery product", "SKU-99"): 12.34},
+            by_product_lineage={},
+        )
+        df = enrich_line_items(rows, cost_maps)
+        self.assertEqual(df.loc[0, "Product_Cost"], 12.34)
 
     def test_order_level_summary(self) -> None:
         df = pd.DataFrame(

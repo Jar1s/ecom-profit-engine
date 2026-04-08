@@ -154,9 +154,33 @@ def get_or_create_supplier_costs_worksheet(
         return sh.worksheet(title)
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet(title=title, rows=3000, cols=10)
-        ws.append_row(["Product", "Cost"], value_input_option="USER_ENTERED")
+        ws.append_row(["Product", "Cost", "SKU"], value_input_option="USER_ENTERED")
         logger.info("Created supplier worksheet %r with header row", title)
         return ws
+
+
+def try_read_worksheet_dataframe(settings: Settings, worksheet_title: str) -> pd.DataFrame | None:
+    """Read a tab as DataFrame, or None if missing / empty / error (non-fatal)."""
+    title = (worksheet_title or "").strip()
+    if not title:
+        return None
+    try:
+        client = _authorize(settings)
+        sh = _open_spreadsheet(client, settings)
+        ws = sh.worksheet(title)
+    except Exception as exc:
+        logger.debug("Worksheet %r not available: %s", title, exc)
+        return None
+    try:
+        values = ws.get_all_values()
+    except Exception as exc:
+        logger.warning("Could not read worksheet %r: %s", title, exc)
+        return None
+    if not values or len(values) < 2:
+        return None
+    header = [str(c).strip() for c in values[0]]
+    rows = values[1:]
+    return pd.DataFrame(rows, columns=header)
 
 
 def dataframe_to_values(df: pd.DataFrame) -> list[list[object]]:

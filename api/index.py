@@ -197,11 +197,25 @@ async def _run_supplier_bill_import(file: UploadFile) -> dict[str, object]:
         )
 
     try:
-        from bill_detail_import import bill_detail_bytes_to_supplier_costs_df
+        from bill_detail_import import (
+            bill_detail_dataframe_to_supplier_costs,
+            bill_detail_single_item_order_rows,
+            read_bill_detail_sheet,
+        )
         from sheets import replace_worksheet_simple
 
-        df = bill_detail_bytes_to_supplier_costs_df(content, file.filename or "export.xls")
+        raw = read_bill_detail_sheet(content, file.filename or "export.xls")
+        df = bill_detail_dataframe_to_supplier_costs(raw)
+        single_df = bill_detail_single_item_order_rows(raw)
+        if df.empty:
+            raise ValueError(
+                "No product lines parsed. Check ProductInfo format (SKU,Title:qty(price))."
+            )
         replace_worksheet_simple(settings, tab, df)
+        if settings.supplier_bill_single_orders_tab and not single_df.empty:
+            replace_worksheet_simple(
+                settings, settings.supplier_bill_single_orders_tab, single_df
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -213,6 +227,7 @@ async def _run_supplier_bill_import(file: UploadFile) -> dict[str, object]:
         "rows": len(df.index),
         "tab": tab,
         "spreadsheet": settings.google_sheet_id or settings.google_sheet_name,
+        "single_item_order_rows": len(single_df.index),
     }
 
 

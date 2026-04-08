@@ -258,7 +258,8 @@ def apply_data_conditional_formatting(
     layout_kind: str | None,
 ) -> None:
     """
-    Data rows only: Gross_Profit < 0 → light red; Marketing_ROAS < threshold → light yellow (daily).
+    Data rows only: Gross_Profit < 0 → light red; Net_Profit < 0 → light red (daily USD mode);
+    Marketing_ROAS < threshold → light yellow (daily).
     """
     if not settings.sheets_conditional_format:
         return
@@ -291,6 +292,26 @@ def apply_data_conditional_formatting(
                         },
                     },
                     "index": 0,
+                }
+            }
+        )
+
+    net_i = _col_index(columns, "Net_Profit")
+    if net_i is not None and layout_kind == "daily":
+        requests.append(
+            {
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [_grid(sheet_id, r0=d0, r1=d1, c0=net_i, c1=net_i + 1)],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "NUMBER_LESS",
+                                "values": [{"userEnteredValue": "0"}],
+                            },
+                            "format": {"backgroundColor": _NEG_PROFIT_BG},
+                        },
+                    },
+                    "index": len(requests),
                 }
             }
         )

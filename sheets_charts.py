@@ -123,7 +123,11 @@ def apply_daily_summary_charts(
         "addChart": {
             "chart": {
                 "spec": {
-                    "title": "Revenue vs výdavky na reklamu (miestna mena)",
+                        "title": (
+                            "Revenue vs Ad_Spend (USD)"
+                            if "Net_Profit" in cols
+                            else "Revenue vs výdavky na reklamu (miestna mena)"
+                        ),
                     "basicChart": {
                         "chartType": "LINE",
                         "legendPosition": "BOTTOM_LEGEND",

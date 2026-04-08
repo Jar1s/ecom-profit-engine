@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from normalize import normalize_product_name
+
+logger = logging.getLogger(__name__)
 
 
 def enrich_line_items(rows: list[dict[str, Any]], cost_map: dict[str, float]) -> pd.DataFrame:
@@ -130,6 +133,66 @@ def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.Data
             continue
         s = pd.to_numeric(out[src], errors="coerce").fillna(0.0)
         out[dst] = (s * float(usd_per_local)).round(2)
+    return out
+
+
+def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    For DAILY_SUMMARY only: drop shop-currency columns and use ``*_USD`` as the main
+    columns (renamed to Revenue, Product_Cost, Gross_Profit, Ad_Spend). Recomputes
+    ``Marketing_ROAS`` and adds ``Net_Profit`` = Gross_Profit − Ad_Spend (same basis as ROAS).
+
+    No-op when ``USD_PER_LOCAL_UNIT`` was not applied (missing ``*_USD`` columns).
+    """
+    required = (
+        "Revenue_USD",
+        "Product_Cost_USD",
+        "Gross_Profit_USD",
+        "Ad_Spend_USD",
+    )
+    if not all(c in df.columns for c in required):
+        logger.info(
+            "daily_summary_usd_primary skipped (set USD_PER_LOCAL_UNIT for %s)",
+            ", ".join(required),
+        )
+        return df
+    out = df.copy()
+    for c in ("Revenue", "Product_Cost", "Gross_Profit", "Ad_Spend"):
+        out = out.drop(columns=[c], errors="ignore")
+    out = out.rename(
+        columns={
+            "Revenue_USD": "Revenue",
+            "Product_Cost_USD": "Product_Cost",
+            "Gross_Profit_USD": "Gross_Profit",
+            "Ad_Spend_USD": "Ad_Spend",
+        }
+    )
+
+    def roas(row: pd.Series) -> float | None:
+        spend = row.get("Ad_Spend")
+        rev = float(row.get("Revenue") or 0)
+        if spend is None or (isinstance(spend, float) and np.isnan(spend)):
+            return None
+        sp = float(spend)
+        if sp <= 0:
+            return None
+        return round(rev / sp, 4)
+
+    out["Marketing_ROAS"] = out.apply(roas, axis=1)
+    gross = pd.to_numeric(out["Gross_Profit"], errors="coerce").fillna(0.0)
+    spend_num = pd.to_numeric(out["Ad_Spend"], errors="coerce").fillna(0.0)
+    out["Net_Profit"] = (gross - spend_num).round(2)
+    preferred = [
+        "Date",
+        "Revenue",
+        "Product_Cost",
+        "Gross_Profit",
+        "Ad_Spend",
+        "Marketing_ROAS",
+        "Net_Profit",
+    ]
+    rest = [c for c in out.columns if c not in preferred]
+    out = out[[c for c in preferred if c in out.columns] + rest]
     return out
 
 

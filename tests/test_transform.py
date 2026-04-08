@@ -6,6 +6,7 @@ import pandas as pd
 
 from transform import (
     daily_summary_from_orders,
+    daily_summary_usd_primary,
     enrich_line_items,
     enrich_meta_usd_columns,
     merge_daily_with_meta,
@@ -96,6 +97,30 @@ class TestTransform(unittest.TestCase):
             rows, meta_spend_in_usd=True, usd_per_local=0.65
         )
         self.assertEqual(merged[0]["Ad_Spend"], 100.0)
+
+    def test_daily_summary_usd_primary(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-04-01",
+                    "Revenue": 100.0,
+                    "Product_Cost": 40.0,
+                    "Gross_Profit": 60.0,
+                    "Ad_Spend": 25.0,
+                    "Revenue_USD": 65.0,
+                    "Product_Cost_USD": 26.0,
+                    "Gross_Profit_USD": 39.0,
+                    "Ad_Spend_USD": 16.25,
+                    "Marketing_ROAS": 4.0,
+                }
+            ]
+        )
+        out = daily_summary_usd_primary(df)
+        self.assertNotIn("Revenue_USD", out.columns)
+        self.assertEqual(out.loc[0, "Revenue"], 65.0)
+        self.assertEqual(out.loc[0, "Product_Cost"], 26.0)
+        self.assertEqual(out.loc[0, "Net_Profit"], 22.75)
+        self.assertEqual(out.loc[0, "Marketing_ROAS"], round(65.0 / 16.25, 4))
 
 
 if __name__ == "__main__":

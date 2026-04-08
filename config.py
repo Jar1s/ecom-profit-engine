@@ -61,6 +61,7 @@ class Settings:
     meta_action_attribution_windows: tuple[str, ...] | None
     sheets_conditional_format: bool
     sheets_roas_warn_below: float | None  # None = do not highlight Marketing_ROAS
+    daily_summary_usd_primary: bool  # DAILY_SUMMARY: only USD columns + Net_Profit (no duplicate AUD)
 
 
 def _require(name: str) -> str:
@@ -275,4 +276,5 @@ def load_settings() -> Settings:
         meta_action_attribution_windows=_meta_action_attribution_windows(),
         sheets_conditional_format=_env_bool("SHEETS_CONDITIONAL_FORMAT", True),
         sheets_roas_warn_below=_sheets_roas_warn_below(),
+        daily_summary_usd_primary=_env_bool("DAILY_SUMMARY_USD_PRIMARY", True),
     )

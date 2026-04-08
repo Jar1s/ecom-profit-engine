@@ -15,6 +15,7 @@ from shopify_client import fetch_order_line_rows
 from sheets import pause_between_sheet_uploads, upload_dataframe
 from transform import (
     daily_summary_from_orders,
+    daily_summary_usd_primary,
     enrich_line_items,
     enrich_meta_usd_columns,
     enrich_usd_columns,
@@ -134,6 +135,8 @@ def main() -> int:
             merge_daily_with_meta(daily_df, meta_for_merge),
             settings.usd_per_local,
         )
+        if settings.daily_summary_usd_primary:
+            daily_final = daily_summary_usd_primary(daily_final)
 
         phase = "sheets"
         _sheet_target = settings.google_sheet_id or settings.google_sheet_name

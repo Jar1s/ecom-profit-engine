@@ -16,6 +16,12 @@ _SHOPIFY_403_HINT = (
     "new token includes that scope."
 )
 
+_META_OAUTH_HINT = (
+    " Renew META_TOKEN in Vercel (or local .env): short-lived Graph tokens expire. "
+    "Use a long-lived user token with ads_read, or re-run token exchange with a fresh short-lived token. "
+    "fb_exchange_token cannot refresh an already-expired session."
+)
+
 
 def _http_error_detail(response: requests.Response) -> str:
     """Short message from JSON body; Shopify often returns {\"errors\": \"...\"}."""
@@ -74,7 +80,12 @@ def get_json(
                             msg = err.get("message", str(err))
                             code = err.get("code")
                             hint = f" (code {code})" if code is not None else ""
-                            raise RuntimeError(f"HTTP {response.status_code}{hint}: {msg}") from None
+                            tail = ""
+                            if code in (190, 102):
+                                tail = _META_OAUTH_HINT
+                            raise RuntimeError(
+                                f"HTTP {response.status_code}{hint}: {msg}{tail}"
+                            ) from None
                 except ValueError:
                     pass
                 response.raise_for_status()

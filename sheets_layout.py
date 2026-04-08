@@ -275,7 +275,7 @@ def sheet_values_with_summary(
             summary.append(_pad(width, [""]))
 
     else:  # daily
-        title = "📊 Denný prehľad + Meta (P&L)"
+        usd_only = settings.daily_summary_usd_primary and "Net_Profit" in df.columns
         n = len(df)
         rev = float(df["Revenue"].sum()) if "Revenue" in df.columns else 0.0
         cogs = float(df["Product_Cost"].sum()) if "Product_Cost" in df.columns else 0.0
@@ -283,57 +283,48 @@ def sheet_values_with_summary(
         ads = 0.0
         if "Ad_Spend" in df.columns:
             ads = float(df["Ad_Spend"].fillna(0).sum())
-        summary.append(
-            _pad(
-                width,
-                [title, f"Mena: {cur}", f"USD/1: {rate_s}", "", "", "", "", ""],
-            )
-        )
-        summary.append(
-            _pad(
-                width,
-                [
-                    "Súčty (všetky dni)",
-                    f"Dní: {n}",
-                    "Revenue",
-                    round(rev, 2),
-                    "Product_Cost",
-                    round(cogs, 2),
-                    "Gross_Profit",
-                    round(gp, 2),
-                ],
-            )
-        )
-        if rate and "Revenue_USD" in df.columns:
-            ad_usd = (
-                float(df["Ad_Spend_USD"].fillna(0).sum()) if "Ad_Spend_USD" in df.columns else 0.0
-            )
+
+        if usd_only:
+            net = float(df["Net_Profit"].sum()) if "Net_Profit" in df.columns else 0.0
+            title = "📊 Denný prehľad (USD) — tržby, COGS, reklama"
             summary.append(
                 _pad(
                     width,
                     [
-                        "Meta Ad_Spend",
-                        round(ads, 2),
-                        "Revenue_USD",
-                        round(float(df["Revenue_USD"].sum()), 2),
-                        "Product_Cost_USD",
-                        round(float(df["Product_Cost_USD"].sum()), 2),
-                        "Gross_Profit_USD",
-                        round(float(df["Gross_Profit_USD"].sum()), 2),
-                        "Ad_Spend USD",
-                        round(ad_usd, 2),
+                        title,
+                        "Všetky sumy v USD (Shopify × kurz; Meta po zlúčení v USD).",
+                        f"Kurz v config: USD_PER_LOCAL_UNIT={rate_s} · REPORT_CURRENCY={cur}",
+                        "Net_Profit = Gross_Profit − Ad_Spend (nie je to kompletný účtovný výsledok).",
+                        "",
+                        "",
+                        "",
+                        "",
                     ],
                 )
             )
-        else:
             summary.append(
                 _pad(
                     width,
                     [
-                        "Meta Ad_Spend",
+                        "Súčty (USD, všetky dni)",
+                        f"Dní: {n}",
+                        "Revenue",
+                        round(rev, 2),
+                        "Product_Cost",
+                        round(cogs, 2),
+                        "Gross_Profit",
+                        round(gp, 2),
+                    ],
+                )
+            )
+            summary.append(
+                _pad(
+                    width,
+                    [
+                        "Ad_Spend",
                         round(ads, 2),
-                        "",
-                        "",
+                        "Net_Profit",
+                        round(net, 2),
                         "",
                         "",
                         "",
@@ -341,6 +332,66 @@ def sheet_values_with_summary(
                     ],
                 )
             )
+        else:
+            title = "📊 Denný prehľad + Meta (P&L)"
+            summary.append(
+                _pad(
+                    width,
+                    [title, f"Mena: {cur}", f"USD/1: {rate_s}", "", "", "", "", ""],
+                )
+            )
+            summary.append(
+                _pad(
+                    width,
+                    [
+                        "Súčty (všetky dni)",
+                        f"Dní: {n}",
+                        "Revenue",
+                        round(rev, 2),
+                        "Product_Cost",
+                        round(cogs, 2),
+                        "Gross_Profit",
+                        round(gp, 2),
+                    ],
+                )
+            )
+            if rate and "Revenue_USD" in df.columns:
+                ad_usd = (
+                    float(df["Ad_Spend_USD"].fillna(0).sum()) if "Ad_Spend_USD" in df.columns else 0.0
+                )
+                summary.append(
+                    _pad(
+                        width,
+                        [
+                            "Meta Ad_Spend (miestna)",
+                            round(ads, 2),
+                            "Revenue_USD",
+                            round(float(df["Revenue_USD"].sum()), 2),
+                            "Product_Cost_USD",
+                            round(float(df["Product_Cost_USD"].sum()), 2),
+                            "Gross_Profit_USD",
+                            round(float(df["Gross_Profit_USD"].sum()), 2),
+                            "Ad_Spend USD",
+                            round(ad_usd, 2),
+                        ],
+                    )
+                )
+            else:
+                summary.append(
+                    _pad(
+                        width,
+                        [
+                            "Meta Ad_Spend",
+                            round(ads, 2),
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                            "",
+                        ],
+                    )
+                )
 
     summary.append(_pad(width, [""] * width))
     header_row_index = len(summary) + 1

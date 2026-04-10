@@ -8,7 +8,8 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from config import Settings
-from http_retry import get_response
+from external_tracking import enrich_orders_carrier_tracking, order_tracking_columns
+from http_retry import get_response, post_graphql_admin
 from shopify_auth import get_shopify_access_token
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,76 @@ _SHIPMENT_PRIORITY: dict[str, int] = {
     "failure": 5,
     "canceled": 0,
 }
+
+# List endpoint often returns only label/confirmed; refetch detail can reveal in_transit/delivered.
+_EARLY_SHIPMENT_ONLY = frozenset({"label_printed", "label_purchased", "confirmed"})
+
+# GraphQL FulfillmentDisplayStatus → REST-style shipment_status for _SHIPMENT_PRIORITY / labels.
+_GRAPHQL_DISPLAY_TO_REST: dict[str, str] = {
+    "ATTEMPTED_DELIVERY": "attempted_delivery",
+    "CANCELED": "canceled",
+    "CARRIER_PICKED_UP": "in_transit",
+    "CONFIRMED": "confirmed",
+    "DELAYED": "in_transit",
+    "DELIVERED": "delivered",
+    "FAILURE": "failure",
+    "FULFILLED": "confirmed",
+    "IN_TRANSIT": "in_transit",
+    "LABEL_PRINTED": "label_printed",
+    "LABEL_PURCHASED": "label_purchased",
+    "LABEL_VOIDED": "canceled",
+    "MARKED_AS_FULFILLED": "confirmed",
+    "NOT_DELIVERED": "failure",
+    "OUT_FOR_DELIVERY": "out_for_delivery",
+    "PICKED_UP": "in_transit",
+    "READY_FOR_PICKUP": "out_for_delivery",
+    "SUBMITTED": "confirmed",
+}
+
+_ORDER_FULFILLMENT_DISPLAY_GQL = """
+query OrderFulfillmentDisplay($id: ID!) {
+  order(id: $id) {
+    fulfillments(first: 50) {
+      nodes {
+        displayStatus
+      }
+    }
+  }
+}
+"""
+
+
+def graphql_display_to_rest_shipment(display: str | None) -> str | None:
+    """Map Admin GraphQL ``Fulfillment.displayStatus`` to REST-style ``shipment_status``."""
+    if display is None:
+        return None
+    key = str(display).strip().upper()
+    return _GRAPHQL_DISPLAY_TO_REST.get(key)
+
+
+def needs_fulfillment_detail_fetch(order: dict[str, Any], *, refetch_early: bool) -> bool:
+    """
+    True when GET /orders/{id}.json should be used to merge richer fulfillments.
+    List orders.json frequently omits fulfillments or shipment_status.
+    """
+    fs = _fulfillment_status_str(order)
+    if fs not in ("fulfilled", "partial"):
+        return False
+    ffs = list(order.get("fulfillments") or [])
+    if not ffs:
+        return True
+    has_status = False
+    for f in ffs:
+        ss = f.get("shipment_status")
+        if ss is not None and str(ss).strip() != "":
+            has_status = True
+            break
+    if not has_status:
+        return True
+    if not refetch_early:
+        return False
+    best = _best_shipment_status(ffs)
+    return best in _EARLY_SHIPMENT_ONLY
 
 
 def _fulfillment_status_str(order: dict[str, Any]) -> str:
@@ -192,6 +263,114 @@ def fetch_all_orders(settings: Settings) -> list[dict[str, Any]]:
     return orders
 
 
+def enrich_orders_with_fulfillment_details(settings: Settings, orders: list[dict[str, Any]]) -> int:
+    """
+    Merge fulfillments from GET /orders/{id}.json when the list response is incomplete.
+    Returns how many detail requests were made.
+    """
+    if not settings.shopify_fulfillment_enrich or not orders:
+        return 0
+    headers = {"X-Shopify-Access-Token": get_shopify_access_token(settings)}
+    base = f"https://{settings.shopify_store}/admin/api/{settings.shopify_api_version}"
+    n = 0
+    for order in orders:
+        if not needs_fulfillment_detail_fetch(
+            order, refetch_early=settings.shopify_fulfillment_refetch_early
+        ):
+            continue
+        oid = order.get("id")
+        if oid is None:
+            continue
+        url = f"{base}/orders/{oid}.json"
+        try:
+            response = get_response(url, settings=settings, params=None, headers=headers)
+            payload = response.json()
+            detail = payload.get("order") or {}
+            detail_ffs = list(detail.get("fulfillments") or [])
+            if detail_ffs:
+                order["fulfillments"] = detail_ffs
+            n += 1
+        except Exception as exc:
+            logger.warning("Shopify order %s: fulfillment detail fetch failed: %s", oid, exc)
+    if n:
+        logger.info(
+            "Shopify: merged fulfillment detail from GET /orders/{{id}}.json for %s orders",
+            n,
+        )
+    return n
+
+
+def _should_graphql_verify_order(order: dict[str, Any]) -> bool:
+    """GraphQL can expose Fulfillment.displayStatus (e.g. DELIVERED) when REST shipment_status lags."""
+    fs = _fulfillment_status_str(order)
+    if fs not in ("fulfilled", "partial"):
+        return False
+    best = _best_shipment_status(list(order.get("fulfillments") or []))
+    return best != "delivered"
+
+
+def enrich_orders_with_fulfillment_graphql(settings: Settings, orders: list[dict[str, Any]]) -> int:
+    """
+    Merge Admin GraphQL ``Fulfillment.displayStatus`` into synthetic ``shipment_status`` rows.
+    Skips orders that already have ``delivered`` from REST. Respects SHOPIFY_GRAPHQL_VERIFY_MAX (0 = no cap).
+    """
+    if not settings.shopify_graphql_fulfillment_verify or not orders:
+        return 0
+    headers = {"X-Shopify-Access-Token": get_shopify_access_token(settings)}
+    n = 0
+    cap = settings.shopify_graphql_verify_max
+    unlimited = cap == 0
+    capped_out = False
+    for order in orders:
+        if not unlimited and cap <= 0:
+            capped_out = True
+            break
+        if not _should_graphql_verify_order(order):
+            continue
+        oid = order.get("id")
+        if oid is None:
+            continue
+        gid = f"gid://shopify/Order/{oid}"
+        try:
+            payload = post_graphql_admin(
+                settings,
+                query=_ORDER_FULFILLMENT_DISPLAY_GQL,
+                variables={"id": gid},
+                headers=headers,
+            )
+        except Exception as exc:
+            logger.warning("Shopify GraphQL order %s: request failed: %s", oid, exc)
+            continue
+        if payload.get("errors"):
+            logger.warning("Shopify GraphQL order %s: %s", oid, payload.get("errors"))
+            continue
+        data = payload.get("data") or {}
+        onode = data.get("order")
+        if not onode:
+            continue
+        nodes = (onode.get("fulfillments") or {}).get("nodes") or []
+        existing = list(order.get("fulfillments") or [])
+        for gn in nodes:
+            rest = graphql_display_to_rest_shipment(gn.get("displayStatus"))
+            if rest:
+                existing.append({"shipment_status": rest})
+        order["fulfillments"] = existing
+        n += 1
+        if not unlimited:
+            cap -= 1
+    if n:
+        logger.info(
+            "Shopify: merged Fulfillment.displayStatus from Admin GraphQL for %s orders",
+            n,
+        )
+    if capped_out:
+        logger.warning(
+            "Shopify GraphQL: SHOPIFY_GRAPHQL_VERIFY_MAX reached; remaining orders skipped "
+            "(raise limit or set to 0 for no cap).",
+        )
+    return n
+
+
 def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """One row per line item; Revenue = unit price * quantity (MVP; discounts not allocated)."""
     rows: list[dict[str, Any]] = []
@@ -202,6 +381,7 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
         order_name = order.get("name") or ""
 
         ship_cols = order_shipping_columns(order)
+        tracking_cols = order_tracking_columns(order)
         for item in order.get("line_items") or []:
             line_id = item.get("id")
             title = (item.get("name") or item.get("title") or "").strip()
@@ -216,12 +396,18 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
             revenue = round(unit_price * qty, 2)
 
             sku = str(item.get("sku") or "").strip()
+            # Put tracking next to Delivery_Status (before dates) so Sheet columns are easy to find.
             rows.append(
                 {
                     "Date": date_str,
                     "Order": order_name,
                     "Order_ID": order_id,
-                    **ship_cols,
+                    "Fulfillment_Status": ship_cols["Fulfillment_Status"],
+                    "Shipment_Status": ship_cols["Shipment_Status"],
+                    "Delivery_Status": ship_cols["Delivery_Status"],
+                    **tracking_cols,
+                    "Shipped_Date": ship_cols["Shipped_Date"],
+                    "Days_In_Transit": ship_cols["Days_In_Transit"],
                     "Line_Item_ID": line_id,
                     "Product": title,
                     "SKU": sku,
@@ -235,6 +421,9 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def fetch_orders_and_line_rows(settings: Settings) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Paginate orders once; return (raw orders, flattened line-item rows)."""
     orders = fetch_all_orders(settings)
+    enrich_orders_with_fulfillment_details(settings, orders)
+    enrich_orders_with_fulfillment_graphql(settings, orders)
+    enrich_orders_carrier_tracking(settings, orders)
     rows = orders_to_line_rows(orders)
     logger.info("Shopify: %s orders -> %s line rows", len(orders), len(rows))
     return orders, rows

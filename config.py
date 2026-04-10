@@ -66,6 +66,12 @@ class Settings:
     learn_costs_from_orders_sheet: bool  # Median unit cost from last ORDERS_DB when supplier row missing
     item_catalog_sheet_tab: str | None  # ITEM_CATALOG: SKU_Prefix → UnitCost (same price for color variants)
     missing_supplier_costs_tab: str | None  # Report tab: line items with Product_Cost=0; empty = off
+    shopify_fulfillment_enrich: bool  # GET /orders/{id} when list omits fulfillments/shipment_status
+    shopify_fulfillment_refetch_early: bool  # Also refetch when only label_* / confirmed (extra API calls)
+    shopify_graphql_fulfillment_verify: bool  # Admin GraphQL Fulfillment.displayStatus when REST not delivered
+    shopify_graphql_verify_max: int  # Max GraphQL order lookups per run; 0 = no cap
+    track17_api_key: str | None  # 17TRACK API — carrier status beyond Shopify (optional)
+    track17_max_trackings_per_run: int  # Max distinct tracking numbers per pipeline run (0 = no cap)
 
 
 def _require(name: str) -> str:
@@ -300,4 +306,10 @@ def load_settings() -> Settings:
         learn_costs_from_orders_sheet=_env_bool("LEARN_COSTS_FROM_ORDERS_SHEET", False),
         item_catalog_sheet_tab=_item_catalog_sheet_tab(),
         missing_supplier_costs_tab=_missing_supplier_costs_tab(),
+        shopify_fulfillment_enrich=_env_bool("SHOPIFY_FULFILLMENT_ENRICH", True),
+        shopify_fulfillment_refetch_early=_env_bool("SHOPIFY_FULFILLMENT_REFETCH_EARLY", False),
+        shopify_graphql_fulfillment_verify=_env_bool("SHOPIFY_GRAPHQL_FULFILLMENT_VERIFY", True),
+        shopify_graphql_verify_max=_optional_int("SHOPIFY_GRAPHQL_VERIFY_MAX", 500),
+        track17_api_key=os.getenv("TRACK17_API_KEY", "").strip() or None,
+        track17_max_trackings_per_run=_optional_int("TRACK17_MAX_TRACKINGS_PER_RUN", 200),
     )

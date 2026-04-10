@@ -135,6 +135,72 @@ def get_response(
     raise last_exc
 
 
+def post_json_with_retry(
+    settings: Settings,
+    url: str,
+    *,
+    headers: dict[str, str],
+    json_body: Any,
+) -> Any:
+    """
+    POST JSON to any URL; retries on 429 / 5xx like :func:`get_response`.
+    ``json_body`` may be a dict or list (e.g. 17TRACK uses a JSON array body).
+    """
+    session = requests.Session()
+    attempt = 0
+    last_exc: Exception | None = None
+    while attempt < settings.http_max_retries:
+        try:
+            response = session.post(url, json=json_body, headers=headers, timeout=120)
+            if response.status_code == 429 or response.status_code >= 500:
+                _sleep_backoff(settings, attempt)
+                attempt += 1
+                continue
+            if response.status_code >= 400:
+                detail = _http_error_detail(response)
+                msg = f"HTTP {response.status_code}"
+                if detail:
+                    msg = f"{msg}: {detail}"
+                else:
+                    msg = f"{msg} for {response.url}"
+                if response.status_code == 403 and "myshopify.com" in (response.url or ""):
+                    msg = msg + _SHOPIFY_403_HINT
+                raise RuntimeError(msg) from None
+            return response.json()
+        except requests.RequestException as exc:
+            last_exc = exc
+            _sleep_backoff(settings, attempt)
+            attempt += 1
+    assert last_exc is not None
+    raise last_exc
+
+
+def post_graphql_admin(
+    settings: Settings,
+    *,
+    query: str,
+    variables: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """
+    POST Shopify Admin GraphQL (`/admin/api/{version}/graphql.json`).
+    Returns parsed JSON (HTTP 200); GraphQL-level errors are in the ``errors`` key.
+    Retries on 429 / 5xx like :func:`get_response`.
+    """
+    shop = settings.shopify_store.strip()
+    if shop.startswith("https://"):
+        shop = shop.replace("https://", "").split("/")[0]
+    url = f"https://{shop}/admin/api/{settings.shopify_api_version}/graphql.json"
+    merged_headers = {"Content-Type": "application/json"}
+    if headers:
+        merged_headers.update(headers)
+    body: dict[str, Any] = {"query": query}
+    if variables is not None:
+        body["variables"] = variables
+    result = post_json_with_retry(settings, url, headers=merged_headers, json_body=body)
+    return result if isinstance(result, dict) else {}
+
+
 def _sleep_backoff(settings: Settings, attempt: int) -> None:
     base = settings.http_backoff_base_seconds * (2**attempt)
     jitter = random.uniform(0, 0.25 * base)

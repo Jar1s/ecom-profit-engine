@@ -3,10 +3,52 @@
 import unittest
 from datetime import date
 
-from shopify_client import order_shipping_columns, orders_to_line_rows
+from shopify_client import (
+    graphql_display_to_rest_shipment,
+    needs_fulfillment_detail_fetch,
+    order_shipping_columns,
+    orders_to_line_rows,
+)
 
 
 class TestShopifyClient(unittest.TestCase):
+    def test_needs_fulfillment_detail_fetch_empty_list(self) -> None:
+        o = {"fulfillment_status": "fulfilled", "fulfillments": []}
+        self.assertTrue(needs_fulfillment_detail_fetch(o, refetch_early=False))
+
+    def test_needs_fulfillment_detail_fetch_no_shipment_status(self) -> None:
+        o = {"fulfillment_status": "fulfilled", "fulfillments": [{"id": 1, "created_at": "2026-04-01T00:00:00Z"}]}
+        self.assertTrue(needs_fulfillment_detail_fetch(o, refetch_early=False))
+
+    def test_needs_fulfillment_detail_fetch_skip_when_delivered(self) -> None:
+        o = {"fulfillment_status": "fulfilled", "fulfillments": [{"shipment_status": "delivered"}]}
+        self.assertFalse(needs_fulfillment_detail_fetch(o, refetch_early=False))
+
+    def test_needs_fulfillment_detail_refetch_early_confirmed(self) -> None:
+        o = {"fulfillment_status": "fulfilled", "fulfillments": [{"shipment_status": "confirmed"}]}
+        self.assertFalse(needs_fulfillment_detail_fetch(o, refetch_early=False))
+        self.assertTrue(needs_fulfillment_detail_fetch(o, refetch_early=True))
+
+    def test_graphql_display_to_rest_shipment(self) -> None:
+        self.assertEqual(graphql_display_to_rest_shipment("DELIVERED"), "delivered")
+        self.assertEqual(graphql_display_to_rest_shipment("IN_TRANSIT"), "in_transit")
+        self.assertEqual(graphql_display_to_rest_shipment("OUT_FOR_DELIVERY"), "out_for_delivery")
+        self.assertIsNone(graphql_display_to_rest_shipment(None))
+
+    def test_should_graphql_verify_order(self) -> None:
+        from shopify_client import _should_graphql_verify_order
+
+        self.assertFalse(
+            _should_graphql_verify_order(
+                {"fulfillment_status": "fulfilled", "fulfillments": [{"shipment_status": "delivered"}]}
+            )
+        )
+        self.assertTrue(
+            _should_graphql_verify_order(
+                {"fulfillment_status": "fulfilled", "fulfillments": [{"shipment_status": "in_transit"}]}
+            )
+        )
+
     def test_order_shipping_columns_unfulfilled(self) -> None:
         o = {"fulfillment_status": None, "fulfillments": []}
         c = order_shipping_columns(o)

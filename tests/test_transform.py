@@ -184,6 +184,50 @@ class TestTransform(unittest.TestCase):
         self.assertEqual(out.loc[0, "Product_Cost"], 6.0)
         self.assertEqual(out.loc[0, "Gross_Profit"], 9.0)
 
+    def test_order_level_summary_with_shipping_columns(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-04-01",
+                    "Order": "#1",
+                    "Order_ID": 1,
+                    "Fulfillment_Status": "fulfilled",
+                    "Shipment_Status": "in_transit",
+                    "Delivery_Status": "In transit",
+                    "Shipped_Date": "2026-03-28",
+                    "Days_In_Transit": 4,
+                    "Line_Item_ID": 1,
+                    "Product": "A",
+                    "Quantity": 1,
+                    "Revenue": 10.0,
+                    "Product_Cost": 4.0,
+                    "Gross_Profit": 6.0,
+                },
+                {
+                    "Date": "2026-04-01",
+                    "Order": "#1",
+                    "Order_ID": 1,
+                    "Fulfillment_Status": "fulfilled",
+                    "Shipment_Status": "in_transit",
+                    "Delivery_Status": "In transit",
+                    "Shipped_Date": "2026-03-28",
+                    "Days_In_Transit": 4,
+                    "Line_Item_ID": 2,
+                    "Product": "B",
+                    "Quantity": 1,
+                    "Revenue": 5.0,
+                    "Product_Cost": 2.0,
+                    "Gross_Profit": 3.0,
+                },
+            ]
+        )
+        out = order_level_summary(df)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out.loc[0, "Delivery_Status"], "In transit")
+        self.assertEqual(out.loc[0, "Shipment_Status"], "in_transit")
+        self.assertEqual(out.loc[0, "Shipped_Date"], "2026-03-28")
+        self.assertEqual(out.loc[0, "Days_In_Transit"], 4)
+
     def test_merge_daily_with_meta_roas(self) -> None:
         daily = pd.DataFrame(
             [

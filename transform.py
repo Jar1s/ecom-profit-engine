@@ -67,6 +67,11 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.Dat
                 "Date",
                 "Order",
                 "Order_ID",
+                "Fulfillment_Status",
+                "Shipment_Status",
+                "Delivery_Status",
+                "Shipped_Date",
+                "Days_In_Transit",
                 "Line_Item_ID",
                 "Product",
                 "SKU",
@@ -104,17 +109,51 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
     """One row per order."""
     if df.empty:
         return pd.DataFrame(
-            columns=["Date", "Order", "Order_ID", "Revenue", "Product_Cost", "Gross_Profit"]
+            columns=[
+                "Date",
+                "Order",
+                "Order_ID",
+                "Fulfillment_Status",
+                "Shipment_Status",
+                "Delivery_Status",
+                "Shipped_Date",
+                "Days_In_Transit",
+                "Revenue",
+                "Product_Cost",
+                "Gross_Profit",
+            ]
         )
-    grouped = (
-        df.groupby(["Date", "Order", "Order_ID"], dropna=False)
-        .agg(
-            Revenue=("Revenue", "sum"),
-            Product_Cost=("Product_Cost", "sum"),
-            Gross_Profit=("Gross_Profit", "sum"),
-        )
-        .reset_index()
-    )
+    agg: dict[str, Any] = {
+        "Revenue": ("Revenue", "sum"),
+        "Product_Cost": ("Product_Cost", "sum"),
+        "Gross_Profit": ("Gross_Profit", "sum"),
+    }
+    for col in (
+        "Fulfillment_Status",
+        "Shipment_Status",
+        "Delivery_Status",
+        "Shipped_Date",
+        "Days_In_Transit",
+    ):
+        if col in df.columns:
+            agg[col] = (col, "first")
+    grouped = df.groupby(["Date", "Order", "Order_ID"], dropna=False).agg(**agg).reset_index()
+    preferred = [
+        "Date",
+        "Order",
+        "Order_ID",
+        "Fulfillment_Status",
+        "Shipment_Status",
+        "Delivery_Status",
+        "Shipped_Date",
+        "Days_In_Transit",
+        "Revenue",
+        "Product_Cost",
+        "Gross_Profit",
+    ]
+    ordered = [c for c in preferred if c in grouped.columns]
+    rest = [c for c in grouped.columns if c not in ordered]
+    grouped = grouped[ordered + rest]
     grouped["Revenue"] = grouped["Revenue"].round(2)
     grouped["Product_Cost"] = grouped["Product_Cost"].round(2)
     grouped["Gross_Profit"] = grouped["Gross_Profit"].round(2)

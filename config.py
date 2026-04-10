@@ -311,5 +311,6 @@ def load_settings() -> Settings:
         shopify_graphql_fulfillment_verify=_env_bool("SHOPIFY_GRAPHQL_FULFILLMENT_VERIFY", True),
         shopify_graphql_verify_max=_optional_int("SHOPIFY_GRAPHQL_VERIFY_MAX", 500),
         track17_api_key=os.getenv("TRACK17_API_KEY", "").strip() or None,
-        track17_max_trackings_per_run=_optional_int("TRACK17_MAX_TRACKINGS_PER_RUN", 200),
+        # 0 = no cap (query all distinct tracking numbers in the run). Set a positive limit to protect API quota.
+        track17_max_trackings_per_run=_optional_int("TRACK17_MAX_TRACKINGS_PER_RUN", 0),
     )

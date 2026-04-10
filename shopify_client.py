@@ -381,7 +381,7 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
         order_name = order.get("name") or ""
 
         ship_cols = order_shipping_columns(order)
-        tracking_cols = order_tracking_columns(order)
+        tracking_cols = order_tracking_columns(order, ship_cols=ship_cols)
         for item in order.get("line_items") or []:
             line_id = item.get("id")
             title = (item.get("name") or item.get("title") or "").strip()

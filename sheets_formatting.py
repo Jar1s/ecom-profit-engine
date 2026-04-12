@@ -270,7 +270,8 @@ def apply_data_conditional_formatting(
     num_cols: int | None = None,
 ) -> None:
     """
-    Data rows only: Delivery_Status = Delivered → light green row (ORDERS_DB, ORDER_LEVEL);
+    Data rows only: Delivery_Status indicates delivered (word match, case-insensitive) → light green
+    (ORDERS_DB, ORDER_LEVEL); handles longer labels, not only the exact string ``Delivered``.
     Gross_Profit < 0 → light red; Net_Profit < 0 → light red (daily USD mode);
     Marketing_ROAS < threshold → light yellow (daily).
     """
@@ -298,7 +299,12 @@ def apply_data_conditional_formatting(
     ):
         col_letter = _a1_column_letters_0based(ds_i)
         first_data_row_1based = d0 + 1
-        formula = f'=${col_letter}{first_data_row_1based}="Delivered"'
+        # Word-boundary match: "Delivered", "DELIVERED", "Delivered — signed", not "Undelivered".
+        # Raw string: plain "\\b" in Python is backspace; Google Sheets needs regex \\b.
+        formula = (
+            f'=REGEXMATCH(${col_letter}{first_data_row_1based},'
+            + r' "(?i)\bdelivered\b")'
+        )
         requests.append(
             {
                 "addConditionalFormatRule": {

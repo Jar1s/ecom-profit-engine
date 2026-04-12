@@ -246,6 +246,17 @@ def _grid(
 
 _NEG_PROFIT_BG = {"red": 0.96, "green": 0.78, "blue": 0.78}
 _ROAS_WARN_BG = {"red": 1.0, "green": 0.94, "blue": 0.75}
+_DELIVERED_BG = {"red": 0.82, "green": 0.94, "blue": 0.84}
+
+
+def _a1_column_letters_0based(col_idx: int) -> str:
+    """0-based column index → A1 column letters (A=0, Z=25, AA=26)."""
+    n = col_idx + 1
+    letters = ""
+    while n:
+        n, r = divmod(n - 1, 26)
+        letters = chr(65 + r) + letters
+    return letters
 
 
 def apply_data_conditional_formatting(
@@ -256,9 +267,11 @@ def apply_data_conditional_formatting(
     num_sheet_rows: int,
     columns: list[str],
     layout_kind: str | None,
+    num_cols: int | None = None,
 ) -> None:
     """
-    Data rows only: Gross_Profit < 0 → light red; Net_Profit < 0 → light red (daily USD mode);
+    Data rows only: Delivery_Status = Delivered → light green row (ORDERS_DB, ORDER_LEVEL);
+    Gross_Profit < 0 → light red; Net_Profit < 0 → light red (daily USD mode);
     Marketing_ROAS < threshold → light yellow (daily).
     """
     if not settings.sheets_conditional_format:
@@ -276,6 +289,36 @@ def apply_data_conditional_formatting(
     clear_worksheet_conditional_format_rules(ws)
     requests: list[dict[str, Any]] = []
 
+    nc = num_cols if num_cols is not None else len(columns)
+    ds_i = _col_index(columns, "Delivery_Status")
+    if (
+        ds_i is not None
+        and layout_kind in ("orders", "order_level")
+        and nc > 0
+    ):
+        col_letter = _a1_column_letters_0based(ds_i)
+        first_data_row_1based = d0 + 1
+        formula = f'=${col_letter}{first_data_row_1based}="Delivered"'
+        requests.append(
+            {
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [
+                            _grid(sheet_id, r0=d0, r1=d1, c0=0, c1=nc),
+                        ],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "CUSTOM_FORMULA",
+                                "values": [{"userEnteredValue": formula}],
+                            },
+                            "format": {"backgroundColor": _DELIVERED_BG},
+                        },
+                    },
+                    "index": len(requests),
+                }
+            }
+        )
+
     gp = _col_index(columns, "Gross_Profit")
     gp_us = _col_index(columns, "Gross_profit")
     if gp is not None and layout_kind in ("orders", "order_level", "daily", "bookkeeping"):
@@ -292,7 +335,7 @@ def apply_data_conditional_formatting(
                             "format": {"backgroundColor": _NEG_PROFIT_BG},
                         },
                     },
-                    "index": 0,
+                    "index": len(requests),
                 }
             }
         )

@@ -381,6 +381,7 @@ def upload_dataframe(
             settings=settings,
             header_row_1based=header_row,
             num_sheet_rows=len(values),
+            num_cols=num_cols,
             columns=list(df.columns),
             layout_kind=layout_kind,
         ),

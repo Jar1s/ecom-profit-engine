@@ -270,8 +270,8 @@ def apply_data_conditional_formatting(
     num_cols: int | None = None,
 ) -> None:
     """
-    Data rows only: Delivery_Status indicates delivered (word match, case-insensitive) → light green
-    (ORDERS_DB, ORDER_LEVEL); handles longer labels, not only the exact string ``Delivered``.
+    Data rows only: delivered (word match, case-insensitive) → light green on ORDERS_DB / ORDER_LEVEL.
+    Uses ``Delivery_Status`` and/or ``Carrier_Tracking_Status`` (17TRACK / long carrier text).
     Gross_Profit < 0 → light red; Net_Profit < 0 → light red (daily USD mode);
     Marketing_ROAS < threshold → light yellow (daily).
     """
@@ -292,38 +292,43 @@ def apply_data_conditional_formatting(
 
     nc = num_cols if num_cols is not None else len(columns)
     ds_i = _col_index(columns, "Delivery_Status")
-    if (
-        ds_i is not None
-        and layout_kind in ("orders", "order_level")
-        and nc > 0
-    ):
-        col_letter = _a1_column_letters_0based(ds_i)
+    cts_i = _col_index(columns, "Carrier_Tracking_Status")
+    if layout_kind in ("orders", "order_level") and nc > 0:
         first_data_row_1based = d0 + 1
-        # Word-boundary match: "Delivered", "DELIVERED", "Delivered — signed", not "Undelivered".
-        # Raw string: plain "\\b" in Python is backspace; Google Sheets needs regex \\b.
-        formula = (
-            f'=REGEXMATCH(${col_letter}{first_data_row_1based},'
-            + r' "(?i)\bdelivered\b")'
-        )
-        requests.append(
-            {
-                "addConditionalFormatRule": {
-                    "rule": {
-                        "ranges": [
-                            _grid(sheet_id, r0=d0, r1=d1, c0=0, c1=nc),
-                        ],
-                        "booleanRule": {
-                            "condition": {
-                                "type": "CUSTOM_FORMULA",
-                                "values": [{"userEnteredValue": formula}],
+        # Word-boundary match on either column (carrier strings are often long, e.g. "DELIVERED WITH SAFE DROP").
+        _delivered_pat = r'"(?i)\bdelivered\b"'
+        delivered_fragments: list[str] = []
+        for idx in (ds_i, cts_i):
+            if idx is None:
+                continue
+            col_letter = _a1_column_letters_0based(idx)
+            delivered_fragments.append(
+                f"REGEXMATCH(${col_letter}{first_data_row_1based}, {_delivered_pat})"
+            )
+        if delivered_fragments:
+            if len(delivered_fragments) == 1:
+                formula = "=" + delivered_fragments[0]
+            else:
+                formula = "=OR(" + ",".join(delivered_fragments) + ")"
+            requests.append(
+                {
+                    "addConditionalFormatRule": {
+                        "rule": {
+                            "ranges": [
+                                _grid(sheet_id, r0=d0, r1=d1, c0=0, c1=nc),
+                            ],
+                            "booleanRule": {
+                                "condition": {
+                                    "type": "CUSTOM_FORMULA",
+                                    "values": [{"userEnteredValue": formula}],
+                                },
+                                "format": {"backgroundColor": _DELIVERED_BG},
                             },
-                            "format": {"backgroundColor": _DELIVERED_BG},
                         },
-                    },
-                    "index": len(requests),
+                        "index": len(requests),
+                    }
                 }
-            }
-        )
+            )
 
     gp = _col_index(columns, "Gross_Profit")
     gp_us = _col_index(columns, "Gross_profit")

@@ -38,6 +38,15 @@ def apply_summary_dashboard_format(
 
     requests.append(
         {
+            "unmergeCells": {
+                "range": {
+                    "sheetId": sheet_id,
+                }
+            }
+        }
+    )
+    requests.append(
+        {
             "mergeCells": {
                 "range": {
                     "sheetId": sheet_id,
@@ -201,9 +210,7 @@ def apply_center_alignment(
 def clear_worksheet_conditional_format_rules(ws: gspread.Worksheet) -> None:
     """Remove all conditional formatting rules on this tab (pipeline overwrites data each run)."""
     try:
-        meta = ws.spreadsheet.fetch_sheet_metadata(
-            params={"fields": "sheets(properties(sheetId),conditionalFormatRules)"}
-        )
+        meta = ws.spreadsheet.fetch_sheet_metadata()
         for sheet in meta.get("sheets", []):
             if sheet.get("properties", {}).get("sheetId") != ws.id:
                 continue

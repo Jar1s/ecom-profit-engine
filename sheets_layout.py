@@ -280,6 +280,21 @@ def sheet_values_with_summary(
         rev = float(df["Revenue"].sum()) if "Revenue" in df.columns else 0.0
         cogs = float(df["Product_Cost"].sum()) if "Product_Cost" in df.columns else 0.0
         gp = float(df["Gross_Profit"].sum()) if "Gross_Profit" in df.columns else 0.0
+        orders_total = int(pd.to_numeric(df.get("Orders_Total"), errors="coerce").fillna(0).sum()) if "Orders_Total" in df.columns else 0
+        orders_delivered = (
+            int(pd.to_numeric(df.get("Orders_Delivered"), errors="coerce").fillna(0).sum())
+            if "Orders_Delivered" in df.columns
+            else 0
+        )
+        orders_undelivered = (
+            int(
+                pd.to_numeric(df.get("Orders_Undelivered"), errors="coerce")
+                .fillna(0)
+                .sum()
+            )
+            if "Orders_Undelivered" in df.columns
+            else 0
+        )
         ads = 0.0
         if "Ad_Spend" in df.columns:
             ads = float(df["Ad_Spend"].fillna(0).sum())
@@ -325,8 +340,10 @@ def sheet_values_with_summary(
                         round(ads, 2),
                         "Net_Profit",
                         round(net, 2),
-                        "",
-                        "",
+                        "Orders Delivered",
+                        orders_delivered,
+                        "Orders Undelivered",
+                        orders_undelivered,
                         "",
                         "",
                     ],
@@ -365,12 +382,14 @@ def sheet_values_with_summary(
                         [
                             "Meta Ad_Spend (miestna)",
                             round(ads, 2),
+                            "Orders",
+                            orders_total,
+                            "Delivered",
+                            orders_delivered,
+                            "Undelivered",
+                            orders_undelivered,
                             "Revenue_USD",
                             round(float(df["Revenue_USD"].sum()), 2),
-                            "Product_Cost_USD",
-                            round(float(df["Product_Cost_USD"].sum()), 2),
-                            "Gross_Profit_USD",
-                            round(float(df["Gross_Profit_USD"].sum()), 2),
                             "Ad_Spend USD",
                             round(ad_usd, 2),
                         ],
@@ -383,12 +402,12 @@ def sheet_values_with_summary(
                         [
                             "Meta Ad_Spend",
                             round(ads, 2),
-                            "",
-                            "",
-                            "",
-                            "",
-                            "",
-                            "",
+                            "Orders",
+                            orders_total,
+                            "Delivered",
+                            orders_delivered,
+                            "Undelivered",
+                            orders_undelivered,
                         ],
                     )
                 )

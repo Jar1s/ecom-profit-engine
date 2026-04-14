@@ -159,7 +159,12 @@ def get_or_create_supplier_costs_worksheet(
         return ws
 
 
-def try_read_worksheet_dataframe(settings: Settings, worksheet_title: str) -> pd.DataFrame | None:
+def try_read_worksheet_dataframe(
+    settings: Settings,
+    worksheet_title: str,
+    *,
+    required_headers: list[str] | tuple[str, ...] | None = None,
+) -> pd.DataFrame | None:
     """Read a tab as DataFrame, or None if missing / empty / error (non-fatal)."""
     title = (worksheet_title or "").strip()
     if not title:
@@ -178,8 +183,25 @@ def try_read_worksheet_dataframe(settings: Settings, worksheet_title: str) -> pd
         return None
     if not values or len(values) < 2:
         return None
-    header = [str(c).strip() for c in values[0]]
-    rows = values[1:]
+    header_row_idx = 0
+    if required_headers:
+        req = {str(h).strip().lower() for h in required_headers if str(h).strip()}
+        for i, row in enumerate(values):
+            present = {str(c).strip().lower() for c in row if str(c).strip()}
+            if req.issubset(present):
+                header_row_idx = i
+                break
+        else:
+            logger.warning(
+                "Worksheet %r: required headers %s not found in any row",
+                title,
+                sorted(req),
+            )
+            return None
+    if header_row_idx + 1 >= len(values):
+        return None
+    header = [str(c).strip() for c in values[header_row_idx]]
+    rows = values[header_row_idx + 1 :]
     return pd.DataFrame(rows, columns=header)
 
 

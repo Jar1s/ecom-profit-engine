@@ -156,7 +156,11 @@ def _learned_unit_costs_from_orders_sheet(settings: "Settings") -> dict[tuple[st
     from sheets import try_read_worksheet_dataframe
 
     tab = os.getenv("SHEET_TAB_ORDERS_DB", "ORDERS_DB").strip() or "ORDERS_DB"
-    df = try_read_worksheet_dataframe(settings, tab)
+    df = try_read_worksheet_dataframe(
+        settings,
+        tab,
+        required_headers=["Product", "Quantity", "Product_Cost"],
+    )
     if df is None or df.empty:
         return {}
     col_lower = {str(c).strip().lower(): c for c in df.columns}

@@ -228,7 +228,17 @@ def bookkeeping_monthly_from_daily(daily_df: pd.DataFrame) -> pd.DataFrame:
 def daily_summary_from_orders(df: pd.DataFrame) -> pd.DataFrame:
     """Daily totals from line-level data."""
     if df.empty:
-        return pd.DataFrame(columns=["Date", "Revenue", "Product_Cost", "Gross_Profit"])
+        return pd.DataFrame(
+            columns=[
+                "Date",
+                "Revenue",
+                "Product_Cost",
+                "Gross_Profit",
+                "Orders_Total",
+                "Orders_Delivered",
+                "Orders_Undelivered",
+            ]
+        )
     daily = (
         df.groupby("Date", dropna=False)
         .agg(
@@ -238,9 +248,43 @@ def daily_summary_from_orders(df: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index()
     )
+    if "Order" in df.columns and "Delivery_Status" in df.columns:
+        order_delivery = (
+            df[["Date", "Order", "Delivery_Status"]]
+            .dropna(subset=["Order"])
+            .drop_duplicates(subset=["Date", "Order"])
+            .copy()
+        )
+        status = (
+            order_delivery["Delivery_Status"]
+            .astype(str)
+            .str.strip()
+            .str.lower()
+        )
+        order_delivery["Is_Delivered"] = status.eq("delivered")
+        counts = (
+            order_delivery.groupby("Date", dropna=False)
+            .agg(
+                Orders_Total=("Order", "nunique"),
+                Orders_Delivered=("Is_Delivered", "sum"),
+            )
+            .reset_index()
+        )
+        counts["Orders_Undelivered"] = (
+            counts["Orders_Total"] - counts["Orders_Delivered"]
+        )
+        daily = daily.merge(counts, on="Date", how="left")
+    else:
+        daily["Orders_Total"] = 0
+        daily["Orders_Delivered"] = 0
+        daily["Orders_Undelivered"] = 0
+
     daily["Revenue"] = daily["Revenue"].round(2)
     daily["Product_Cost"] = daily["Product_Cost"].round(2)
     daily["Gross_Profit"] = daily["Gross_Profit"].round(2)
+    for col in ("Orders_Total", "Orders_Delivered", "Orders_Undelivered"):
+        if col in daily.columns:
+            daily[col] = pd.to_numeric(daily[col], errors="coerce").fillna(0).astype(int)
     return daily
 
 

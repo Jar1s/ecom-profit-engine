@@ -244,6 +244,41 @@ class TestTransform(unittest.TestCase):
         merged = merge_daily_with_meta(daily, meta)
         self.assertEqual(merged.loc[0, "Marketing_ROAS"], 4.0)
 
+    def test_daily_summary_from_orders_delivery_counts(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-04-01",
+                    "Order": "#1001",
+                    "Revenue": 10.0,
+                    "Product_Cost": 3.0,
+                    "Gross_Profit": 7.0,
+                    "Delivery_Status": "Delivered",
+                },
+                {
+                    "Date": "2026-04-01",
+                    "Order": "#1001",
+                    "Revenue": 5.0,
+                    "Product_Cost": 2.0,
+                    "Gross_Profit": 3.0,
+                    "Delivery_Status": "Delivered",
+                },
+                {
+                    "Date": "2026-04-01",
+                    "Order": "#1002",
+                    "Revenue": 20.0,
+                    "Product_Cost": 8.0,
+                    "Gross_Profit": 12.0,
+                    "Delivery_Status": "In transit",
+                },
+            ]
+        )
+        out = daily_summary_from_orders(df)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out.loc[0, "Orders_Total"], 2)
+        self.assertEqual(out.loc[0, "Orders_Delivered"], 1)
+        self.assertEqual(out.loc[0, "Orders_Undelivered"], 1)
+
     def test_enrich_meta_usd_columns_already_usd(self) -> None:
         df = pd.DataFrame([{"Date": "2026-04-01", "Ad_Spend": 100.0}])
         out = enrich_meta_usd_columns(

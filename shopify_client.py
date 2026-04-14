@@ -57,10 +57,8 @@ _GRAPHQL_DISPLAY_TO_REST: dict[str, str] = {
 _ORDER_FULFILLMENT_DISPLAY_GQL = """
 query OrderFulfillmentDisplay($id: ID!) {
   order(id: $id) {
-    fulfillments(first: 50) {
-      nodes {
-        displayStatus
-      }
+    fulfillments {
+      displayStatus
     }
   }
 }
@@ -348,7 +346,9 @@ def enrich_orders_with_fulfillment_graphql(settings: Settings, orders: list[dict
         onode = data.get("order")
         if not onode:
             continue
-        nodes = (onode.get("fulfillments") or {}).get("nodes") or []
+        nodes = onode.get("fulfillments") or []
+        if isinstance(nodes, dict):
+            nodes = nodes.get("nodes") or []
         existing = list(order.get("fulfillments") or [])
         for gn in nodes:
             rest = graphql_display_to_rest_shipment(gn.get("displayStatus"))

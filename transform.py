@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import numpy as np
@@ -17,6 +18,19 @@ from normalize import (
 )
 
 logger = logging.getLogger(__name__)
+_DELIVERED_WORD_RE = re.compile(r"\bdelivered\b", re.IGNORECASE)
+
+
+def _is_delivered_row(row: pd.Series) -> bool:
+    """Delivery detection for summary counts (Shopify + carrier fallback)."""
+    delivery_status = str(row.get("Delivery_Status") or "").strip().lower()
+    if delivery_status == "delivered":
+        return True
+    shipment_status = str(row.get("Shipment_Status") or "").strip().lower()
+    if shipment_status == "delivered":
+        return True
+    carrier_status = str(row.get("Carrier_Tracking_Status") or "").strip()
+    return bool(_DELIVERED_WORD_RE.search(carrier_status))
 
 
 def _line_unit_cost(
@@ -249,19 +263,17 @@ def daily_summary_from_orders(df: pd.DataFrame) -> pd.DataFrame:
         .reset_index()
     )
     if "Order" in df.columns and "Delivery_Status" in df.columns:
+        keep_cols = ["Date", "Order", "Delivery_Status"]
+        for optional in ("Shipment_Status", "Carrier_Tracking_Status"):
+            if optional in df.columns:
+                keep_cols.append(optional)
         order_delivery = (
-            df[["Date", "Order", "Delivery_Status"]]
+            df[keep_cols]
             .dropna(subset=["Order"])
             .drop_duplicates(subset=["Date", "Order"])
             .copy()
         )
-        status = (
-            order_delivery["Delivery_Status"]
-            .astype(str)
-            .str.strip()
-            .str.lower()
-        )
-        order_delivery["Is_Delivered"] = status.eq("delivered")
+        order_delivery["Is_Delivered"] = order_delivery.apply(_is_delivered_row, axis=1)
         counts = (
             order_delivery.groupby("Date", dropna=False)
             .agg(

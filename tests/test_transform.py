@@ -279,6 +279,26 @@ class TestTransform(unittest.TestCase):
         self.assertEqual(out.loc[0, "Orders_Delivered"], 1)
         self.assertEqual(out.loc[0, "Orders_Undelivered"], 1)
 
+    def test_daily_summary_from_orders_delivery_counts_from_carrier_status(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-04-02",
+                    "Order": "#2001",
+                    "Revenue": 30.0,
+                    "Product_Cost": 10.0,
+                    "Gross_Profit": 20.0,
+                    "Delivery_Status": "In transit",
+                    "Shipment_Status": "in_transit",
+                    "Carrier_Tracking_Status": "DELIVERED WITH SAFE DROP",
+                }
+            ]
+        )
+        out = daily_summary_from_orders(df)
+        self.assertEqual(out.loc[0, "Orders_Total"], 1)
+        self.assertEqual(out.loc[0, "Orders_Delivered"], 1)
+        self.assertEqual(out.loc[0, "Orders_Undelivered"], 0)
+
     def test_enrich_meta_usd_columns_already_usd(self) -> None:
         df = pd.DataFrame([{"Date": "2026-04-01", "Ad_Spend": 100.0}])
         out = enrich_meta_usd_columns(

@@ -373,6 +373,48 @@ def run_pipeline(request: Request) -> JSONResponse:
         )
 
 
+@app.api_route("/cron/core", methods=["GET", "POST"])
+def run_pipeline_core(request: Request) -> JSONResponse:
+    _check_auth(request)
+    try:
+        from pipeline import main
+
+        code = main("core")
+        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "core"})
+    except Exception as exc:
+        logger.exception("Pipeline core failed")
+        logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "core"})
+
+
+@app.api_route("/cron/tracking", methods=["GET", "POST"])
+def run_pipeline_tracking(request: Request) -> JSONResponse:
+    _check_auth(request)
+    try:
+        from pipeline import main
+
+        code = main("tracking")
+        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "tracking"})
+    except Exception as exc:
+        logger.exception("Pipeline tracking failed")
+        logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "tracking"})
+
+
+@app.api_route("/cron/reporting", methods=["GET", "POST"])
+def run_pipeline_reporting(request: Request) -> JSONResponse:
+    _check_auth(request)
+    try:
+        from pipeline import main
+
+        code = main("reporting")
+        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "reporting"})
+    except Exception as exc:
+        logger.exception("Pipeline reporting failed")
+        logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "reporting"})
+
+
 @app.get("/debug/shopify-env")
 def debug_shopify_env(request: Request) -> JSONResponse:
     """Sanitized runtime view of Shopify auth env. Protected by the same auth as /cron."""

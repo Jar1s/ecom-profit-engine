@@ -234,13 +234,20 @@ def _next_url_from_link_header(link_header: str | None) -> str | None:
     return None
 
 
-def fetch_all_orders(settings: Settings) -> list[dict[str, Any]]:
+def fetch_all_orders(
+    settings: Settings,
+    *,
+    updated_at_min: str | None = None,
+) -> list[dict[str, Any]]:
     """Return all orders from Admin REST API (paginated)."""
     base = (
         f"https://{settings.shopify_store}/admin/api/"
         f"{settings.shopify_api_version}/orders.json"
     )
     params: dict[str, Any] = {"status": "any", "limit": 250}
+    if updated_at_min:
+        params["updated_at_min"] = updated_at_min
+        params["order"] = "updated_at asc"
 
     orders: list[dict[str, Any]] = []
     url: str | None = base
@@ -272,6 +279,23 @@ def fetch_all_orders(settings: Settings) -> list[dict[str, Any]]:
         next_url = _next_url_from_link_header(response.headers.get("Link"))
         url = next_url
 
+    return orders
+
+
+def fetch_orders_by_ids(settings: Settings, order_ids: list[int | str]) -> list[dict[str, Any]]:
+    """Fetch exact orders by id via GET /orders/{id}.json."""
+    ids = [str(x).strip() for x in order_ids if str(x).strip()]
+    if not ids:
+        return []
+    headers = {"X-Shopify-Access-Token": get_shopify_access_token(settings)}
+    base = f"https://{settings.shopify_store}/admin/api/{settings.shopify_api_version}"
+    orders: list[dict[str, Any]] = []
+    for oid in ids:
+        url = f"{base}/orders/{oid}.json"
+        response = get_response(url, settings=settings, params=None, headers=headers)
+        order = (response.json() or {}).get("order")
+        if isinstance(order, dict):
+            orders.append(order)
     return orders
 
 
@@ -432,15 +456,23 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
-def fetch_orders_and_line_rows(settings: Settings) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def fetch_orders_and_line_rows(
+    settings: Settings,
+    *,
+    updated_at_min: str | None = None,
+    orders: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Paginate orders once; return (raw orders, flattened line-item rows)."""
-    orders = fetch_all_orders(settings)
-    enrich_orders_with_fulfillment_details(settings, orders)
-    enrich_orders_with_fulfillment_graphql(settings, orders)
-    enrich_orders_carrier_tracking(settings, orders)
-    rows = orders_to_line_rows(orders)
-    logger.info("Shopify: %s orders -> %s line rows", len(orders), len(rows))
-    return orders, rows
+    selected = list(orders) if orders is not None else fetch_all_orders(
+        settings,
+        updated_at_min=updated_at_min,
+    )
+    enrich_orders_with_fulfillment_details(settings, selected)
+    enrich_orders_with_fulfillment_graphql(settings, selected)
+    enrich_orders_carrier_tracking(settings, selected)
+    rows = orders_to_line_rows(selected)
+    logger.info("Shopify: %s orders -> %s line rows", len(selected), len(rows))
+    return selected, rows
 
 
 def fetch_order_line_rows(settings: Settings) -> list[dict[str, Any]]:

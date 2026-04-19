@@ -72,6 +72,12 @@ class Settings:
     shopify_graphql_verify_max: int  # Max GraphQL order lookups per run; 0 = no cap
     track17_api_key: str | None  # 17TRACK API — carrier status beyond Shopify (optional)
     track17_max_trackings_per_run: int  # Max distinct tracking numbers per pipeline run (0 = no cap)
+    pipeline_mode: str  # full | core | tracking | reporting
+    pipeline_enable_incremental: bool
+    pipeline_enable_parity_check: bool
+    pipeline_state_tab: str
+    pipeline_overlap_minutes: int
+    tracking_active_lookback_days: int
 
 
 def _require(name: str) -> str:
@@ -324,4 +330,10 @@ def load_settings() -> Settings:
         track17_api_key=os.getenv("TRACK17_API_KEY", "").strip() or None,
         # 0 = no cap (query all distinct tracking numbers in the run). Set a positive limit to protect API quota.
         track17_max_trackings_per_run=_optional_int("TRACK17_MAX_TRACKINGS_PER_RUN", 0),
+        pipeline_mode=(os.getenv("PIPELINE_MODE", "full").strip().lower() or "full"),
+        pipeline_enable_incremental=_env_bool("PIPELINE_ENABLE_INCREMENTAL", False),
+        pipeline_enable_parity_check=_env_bool("PIPELINE_ENABLE_PARITY_CHECK", False),
+        pipeline_state_tab=(os.getenv("PIPELINE_STATE_TAB", "PIPELINE_STATE").strip() or "PIPELINE_STATE"),
+        pipeline_overlap_minutes=max(0, _optional_int("PIPELINE_OVERLAP_MINUTES", 10)),
+        tracking_active_lookback_days=max(1, _optional_int("TRACKING_ACTIVE_LOOKBACK_DAYS", 30)),
     )

@@ -1,32 +1,48 @@
-# Scheduled run: set secrets SHOPIFY_STORE, META_TOKEN, AD_ACCOUNT_ID,
-# GOOGLE_SHEET_NAME, GOOGLE_CREDENTIALS_JSON (full service account JSON text).
-# Shopify: either SHOPIFY_TOKEN or SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET.
-# Optional Meta long-lived refresh: META_APP_ID, META_APP_SECRET (with META_TOKEN).
-
 name: Ecom Profit Engine
 
 on:
   schedule:
-    # Every 10 minutes (UTC); adjust as needed
-    - cron: "*/10 * * * *"
+    - cron: '*/15 * * * *'
+    - cron: '0 8,20 * * *'
+    - cron: '30 2 * * *'
   workflow_dispatch:
+    inputs:
+      pipeline_mode:
+        description: 'Pipeline mode to run'
+        required: true
+        default: 'core'
+        type: choice
+        options:
+          - full
+          - core
+          - tracking
+          - reporting
+      parity_check:
+        description: 'Enable parity check'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
-  sync:
+  core:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.pipeline_mode == 'core'
+      || github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *'
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-
+          python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Run pipeline
+        working-directory: ecom-profit-engine
+      - name: Run core pipeline
+        working-directory: ecom-profit-engine
         env:
+          PIPELINE_MODE: core
+          PIPELINE_ENABLE_INCREMENTAL: '1'
+          PIPELINE_ENABLE_PARITY_CHECK: ${{ github.event_name == 'workflow_dispatch' && inputs.parity_check && '1' || '0' }}
           SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
           SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
           SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
@@ -36,5 +52,112 @@ jobs:
           META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
           AD_ACCOUNT_ID: ${{ secrets.AD_ACCOUNT_ID }}
           GOOGLE_SHEET_NAME: ${{ secrets.GOOGLE_SHEET_NAME }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          TRACK17_API_KEY: ${{ secrets.TRACK17_API_KEY }}
+        run: python pipeline.py
+
+  tracking:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.pipeline_mode == 'tracking'
+      || github.event_name == 'schedule' && github.event.schedule == '0 8,20 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        working-directory: ecom-profit-engine
+      - name: Run tracking pipeline
+        working-directory: ecom-profit-engine
+        env:
+          PIPELINE_MODE: tracking
+          PIPELINE_ENABLE_INCREMENTAL: '1'
+          PIPELINE_ENABLE_PARITY_CHECK: ${{ github.event_name == 'workflow_dispatch' && inputs.parity_check && '1' || '0' }}
+          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+          SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          META_TOKEN: ${{ secrets.META_TOKEN }}
+          META_APP_ID: ${{ secrets.META_APP_ID }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+          AD_ACCOUNT_ID: ${{ secrets.AD_ACCOUNT_ID }}
+          GOOGLE_SHEET_NAME: ${{ secrets.GOOGLE_SHEET_NAME }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          TRACK17_API_KEY: ${{ secrets.TRACK17_API_KEY }}
+        run: python pipeline.py
+
+  reporting:
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.pipeline_mode == 'reporting'
+      || github.event_name == 'schedule' && github.event.schedule == '30 2 * * *'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        working-directory: ecom-profit-engine
+      - name: Run reporting pipeline
+        working-directory: ecom-profit-engine
+        env:
+          PIPELINE_MODE: reporting
+          PIPELINE_ENABLE_INCREMENTAL: '1'
+          PIPELINE_ENABLE_PARITY_CHECK: ${{ github.event_name == 'workflow_dispatch' && inputs.parity_check && '1' || '0' }}
+          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+          SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          META_TOKEN: ${{ secrets.META_TOKEN }}
+          META_APP_ID: ${{ secrets.META_APP_ID }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+          AD_ACCOUNT_ID: ${{ secrets.AD_ACCOUNT_ID }}
+          GOOGLE_SHEET_NAME: ${{ secrets.GOOGLE_SHEET_NAME }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          TRACK17_API_KEY: ${{ secrets.TRACK17_API_KEY }}
+        run: python pipeline.py
+
+  full:
+    if: github.event_name == 'workflow_dispatch' && inputs.pipeline_mode == 'full'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+        working-directory: ecom-profit-engine
+      - name: Run full rebuild
+        working-directory: ecom-profit-engine
+        env:
+          PIPELINE_MODE: full
+          PIPELINE_ENABLE_INCREMENTAL: '0'
+          PIPELINE_ENABLE_PARITY_CHECK: ${{ github.event_name == 'workflow_dispatch' && inputs.parity_check && '1' || '0' }}
+          SHOPIFY_STORE: ${{ secrets.SHOPIFY_STORE }}
+          SHOPIFY_TOKEN: ${{ secrets.SHOPIFY_TOKEN }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          META_TOKEN: ${{ secrets.META_TOKEN }}
+          META_APP_ID: ${{ secrets.META_APP_ID }}
+          META_APP_SECRET: ${{ secrets.META_APP_SECRET }}
+          AD_ACCOUNT_ID: ${{ secrets.AD_ACCOUNT_ID }}
+          GOOGLE_SHEET_NAME: ${{ secrets.GOOGLE_SHEET_NAME }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_SHEET_URL: ${{ secrets.GOOGLE_SHEET_URL }}
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          TRACK17_API_KEY: ${{ secrets.TRACK17_API_KEY }}
         run: python pipeline.py

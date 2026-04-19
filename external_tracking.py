@@ -169,10 +169,22 @@ def _log_track17_rejected(endpoint: str, payload: dict[str, Any]) -> None:
     rejected = data.get("rejected") or []
     if not rejected:
         return
-    for item in rejected[:15]:
+    repeated = 0
+    sample: list[dict[str, Any]] = []
+    for item in rejected:
+        msg = str(((item.get("error") or {}).get("message")) or "").strip().lower()
+        if "don't need to repeat registration" in msg or "no tracking information at this time" in msg:
+            repeated += 1
+            continue
+        if len(sample) < 10:
+            sample.append(item)
+    for item in sample:
         logger.info("17TRACK %s rejected: %s", endpoint, item)
-    if len(rejected) > 15:
-        logger.info("17TRACK %s: … and %s more rejected", endpoint, len(rejected) - 15)
+    if repeated:
+        logger.info("17TRACK %s: %s repeated/empty rejections suppressed", endpoint, repeated)
+    remaining = len(rejected) - repeated - len(sample)
+    if remaining > 0:
+        logger.info("17TRACK %s: … and %s more rejected", endpoint, remaining)
 
 
 def track17_register_and_status(

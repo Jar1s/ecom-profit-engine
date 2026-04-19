@@ -7,7 +7,8 @@ import os
 import sys
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +18,7 @@ if _ROOT not in sys.path:
 from . import ui
 from .dashboard import (
     bookkeeping_table,
+    dataframe_to_json_records,
     load_dashboard_bundle,
     marketing_campaign_table,
     missing_costs_table,
@@ -34,6 +36,11 @@ logging.basicConfig(
 logger = logging.getLogger("ecom_profit_engine.api")
 
 app = FastAPI(title="Ecom Profit Engine")
+
+_STATIC_APP_DIR = os.path.join(_ROOT, "static", "app")
+_STATIC_APP_ASSETS = os.path.join(_STATIC_APP_DIR, "assets")
+if os.path.isdir(_STATIC_APP_ASSETS):
+    app.mount("/app/assets", StaticFiles(directory=_STATIC_APP_ASSETS), name="app_assets")
 
 
 def _session_signing_secret() -> str:
@@ -67,6 +74,67 @@ def _require_app_user(request: Request) -> RedirectResponse | None:
     if sess is not None and sess.get("app_auth"):
         return None
     return RedirectResponse(url="/app/login", status_code=302)
+
+
+def _require_app_session_api(request: Request) -> None:
+    """401 JSON keď je CRON_SECRET ale chýba prihlásenie."""
+    if not _cron_secret():
+        return
+    sess = getattr(request, "session", None)
+    if sess is not None and sess.get("app_auth"):
+        return
+    raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _spa_index_response() -> FileResponse:
+    path = os.path.join(_STATIC_APP_DIR, "index.html")
+    if not os.path.isfile(path):
+        raise HTTPException(
+            status_code=503,
+            detail="Frontend nie je zbuildovaný. Spusti: cd web && npm install && npm run build",
+        )
+    return FileResponse(path)
+
+
+def _legacy_app_html(request: Request) -> Response:
+    """HTML fallback keď chýba React build."""
+    bundle = load_dashboard_bundle()
+    path = request.url.path.rstrip("/") or "/app"
+    if path == "/app":
+        return HTMLResponse(
+            ui.page_dashboard(
+                status=ui.ui_status(),
+                cards=summary_cards(bundle),
+                runs=run_status_rows(bundle),
+                recent_orders=recent_orders_table(bundle),
+                recent_daily=recent_daily_table(bundle),
+            )
+        )
+    if path == "/app/orders":
+        return HTMLResponse(ui.page_orders(recent_orders_table(bundle, limit=100)))
+    if path == "/app/daily":
+        return HTMLResponse(ui.page_daily(recent_daily_table(bundle, limit=100)))
+    if path == "/app/marketing":
+        rd = recent_daily_table(bundle, limit=100)
+        meta_cols = [c for c in rd.columns if c in ("Date", "Ad_Spend", "Marketing_ROAS")]
+        meta_table = rd[meta_cols] if not rd.empty and meta_cols else rd
+        return HTMLResponse(ui.page_marketing(meta_table, marketing_campaign_table(bundle, limit=100)))
+    if path == "/app/accounting":
+        return HTMLResponse(ui.page_accounting(bookkeeping_table(bundle, limit=36)))
+    if path == "/app/costs":
+        return HTMLResponse(ui.page_costs(missing_costs_table(bundle, limit=100)))
+    if path == "/app/jobs":
+        return HTMLResponse(ui.page_jobs(run_status_rows(bundle)))
+    raise HTTPException(status_code=404, detail="Not found")
+
+
+def _app_shell_response(request: Request) -> Response:
+    redir = _require_app_user(request)
+    if redir:
+        return redir
+    if os.path.isfile(os.path.join(_STATIC_APP_DIR, "index.html")):
+        return _spa_index_response()
+    return _legacy_app_html(request)
 
 
 def _check_auth_import(request: Request, form_token: str | None = None) -> None:
@@ -286,80 +354,109 @@ def root(request: Request) -> dict[str, str] | RedirectResponse:
     }
 
 
-@app.get("/app", response_class=HTMLResponse, response_model=None)
-def app_home(request: Request) -> Response:
-    redir = _require_app_user(request)
-    if redir:
-        return redir
+@app.get("/api/app/dashboard", response_model=None)
+def api_app_dashboard(request: Request) -> JSONResponse:
+    _require_app_session_api(request)
     bundle = load_dashboard_bundle()
-    return HTMLResponse(
-        ui.page_dashboard(
-            status=ui.ui_status(),
-            cards=summary_cards(bundle),
-            runs=run_status_rows(bundle),
-            recent_orders=recent_orders_table(bundle),
-            recent_daily=recent_daily_table(bundle),
-        )
+    return JSONResponse(
+        {
+            "status": ui.ui_status(),
+            "cards": summary_cards(bundle),
+            "runs": run_status_rows(bundle),
+            "recent_orders": dataframe_to_json_records(recent_orders_table(bundle)),
+            "recent_daily": dataframe_to_json_records(recent_daily_table(bundle)),
+        }
     )
 
 
-@app.get("/app/orders", response_class=HTMLResponse, response_model=None)
-def app_orders(request: Request) -> Response:
-    redir = _require_app_user(request)
-    if redir:
-        return redir
+@app.get("/api/app/orders", response_model=None)
+def api_app_orders(request: Request) -> JSONResponse:
+    _require_app_session_api(request)
     bundle = load_dashboard_bundle()
-    return HTMLResponse(ui.page_orders(recent_orders_table(bundle, limit=100)))
+    return JSONResponse({"rows": dataframe_to_json_records(recent_orders_table(bundle, limit=100))})
 
 
-@app.get("/app/daily", response_class=HTMLResponse, response_model=None)
-def app_daily(request: Request) -> Response:
-    redir = _require_app_user(request)
-    if redir:
-        return redir
+@app.get("/api/app/daily", response_model=None)
+def api_app_daily(request: Request) -> JSONResponse:
+    _require_app_session_api(request)
     bundle = load_dashboard_bundle()
-    return HTMLResponse(ui.page_daily(recent_daily_table(bundle, limit=100)))
+    return JSONResponse({"rows": dataframe_to_json_records(recent_daily_table(bundle, limit=100))})
 
 
-@app.get("/app/marketing", response_class=HTMLResponse, response_model=None)
-def app_marketing(request: Request) -> Response:
-    redir = _require_app_user(request)
-    if redir:
-        return redir
+@app.get("/api/app/marketing", response_model=None)
+def api_app_marketing(request: Request) -> JSONResponse:
+    _require_app_session_api(request)
     bundle = load_dashboard_bundle()
-    return HTMLResponse(
-        ui.page_marketing(
-            recent_daily_table(bundle, limit=100)[[c for c in recent_daily_table(bundle, limit=100).columns if c in ("Date", "Ad_Spend", "Marketing_ROAS")]],
-            marketing_campaign_table(bundle, limit=100),
-        )
+    rd = recent_daily_table(bundle, limit=100)
+    meta_cols = [c for c in rd.columns if c in ("Date", "Ad_Spend", "Marketing_ROAS")]
+    meta_table = rd[meta_cols] if not rd.empty and meta_cols else rd
+    return JSONResponse(
+        {
+            "meta_daily": dataframe_to_json_records(meta_table),
+            "campaigns": dataframe_to_json_records(marketing_campaign_table(bundle, limit=100)),
+        }
     )
 
 
-@app.get("/app/accounting", response_class=HTMLResponse, response_model=None)
-def app_accounting(request: Request) -> Response:
-    redir = _require_app_user(request)
-    if redir:
-        return redir
+@app.get("/api/app/accounting", response_model=None)
+def api_app_accounting(request: Request) -> JSONResponse:
+    _require_app_session_api(request)
     bundle = load_dashboard_bundle()
-    return HTMLResponse(ui.page_accounting(bookkeeping_table(bundle, limit=36)))
+    return JSONResponse({"rows": dataframe_to_json_records(bookkeeping_table(bundle, limit=36))})
 
 
-@app.get("/app/costs", response_class=HTMLResponse, response_model=None)
-def app_costs(request: Request) -> Response:
-    redir = _require_app_user(request)
-    if redir:
-        return redir
+@app.get("/api/app/costs", response_model=None)
+def api_app_costs(request: Request) -> JSONResponse:
+    _require_app_session_api(request)
     bundle = load_dashboard_bundle()
-    return HTMLResponse(ui.page_costs(missing_costs_table(bundle, limit=100)))
+    return JSONResponse({"rows": dataframe_to_json_records(missing_costs_table(bundle, limit=100))})
 
 
-@app.get("/app/jobs", response_class=HTMLResponse, response_model=None)
-def app_jobs(request: Request) -> Response:
-    redir = _require_app_user(request)
-    if redir:
-        return redir
+@app.get("/api/app/jobs", response_model=None)
+def api_app_jobs(request: Request) -> JSONResponse:
+    _require_app_session_api(request)
     bundle = load_dashboard_bundle()
-    return HTMLResponse(ui.page_jobs(run_status_rows(bundle)))
+    return JSONResponse({"runs": run_status_rows(bundle)})
+
+
+@app.post("/api/app/run/{mode}", response_model=None)
+def api_app_run(request: Request, mode: str) -> JSONResponse:
+    _require_app_session_api(request)
+    mode_norm = (mode or "").strip().lower()
+    if mode_norm not in {"full", "core", "tracking", "reporting"}:
+        raise HTTPException(status_code=404, detail="Unknown pipeline mode")
+    try:
+        from pipeline import main
+
+        code = main(mode_norm)
+        ok = code == 0
+        msg = (
+            f"Pipeline mód {mode_norm} sa úspešne aktualizoval."
+            if ok
+            else f"Pipeline mód {mode_norm} skončil s návratovým kódom {code}."
+        )
+        return JSONResponse(
+            status_code=200 if ok else 500,
+            content={"ok": ok, "exitCode": code, "mode": mode_norm, "message": msg},
+        )
+    except Exception as exc:
+        logger.exception("App pipeline failed for mode=%s", mode_norm)
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "mode": mode_norm, "error": str(exc)},
+        )
+
+
+@app.get("/app", response_model=None)
+@app.get("/app/", response_model=None)
+@app.get("/app/orders", response_model=None)
+@app.get("/app/daily", response_model=None)
+@app.get("/app/marketing", response_model=None)
+@app.get("/app/accounting", response_model=None)
+@app.get("/app/costs", response_model=None)
+@app.get("/app/jobs", response_model=None)
+def app_shell(request: Request) -> Response:
+    return _app_shell_response(request)
 
 
 @app.get("/app/login", response_class=HTMLResponse, response_model=None)

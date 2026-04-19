@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -40,6 +41,13 @@ def _load_df(settings: Settings, tab: str, required: tuple[str, ...] | None = No
     if df is None:
         return pd.DataFrame()
     return df.copy()
+
+
+def dataframe_to_json_records(df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Serialize worksheet-shaped DataFrame for JSON API (NaN → null)."""
+    if df is None or df.empty:
+        return []
+    return json.loads(df.to_json(orient="records", date_format="iso"))
 
 
 def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:

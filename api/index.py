@@ -15,6 +15,16 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from . import ui
+from .dashboard import (
+    bookkeeping_table,
+    load_dashboard_bundle,
+    marketing_campaign_table,
+    missing_costs_table,
+    recent_daily_table,
+    recent_orders_table,
+    run_status_rows,
+    summary_cards,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -281,7 +291,75 @@ def app_home(request: Request) -> Response:
     redir = _require_app_user(request)
     if redir:
         return redir
-    return HTMLResponse(ui.page_dashboard(ui.ui_status()))
+    bundle = load_dashboard_bundle()
+    return HTMLResponse(
+        ui.page_dashboard(
+            status=ui.ui_status(),
+            cards=summary_cards(bundle),
+            runs=run_status_rows(bundle),
+            recent_orders=recent_orders_table(bundle),
+            recent_daily=recent_daily_table(bundle),
+        )
+    )
+
+
+@app.get("/app/orders", response_class=HTMLResponse, response_model=None)
+def app_orders(request: Request) -> Response:
+    redir = _require_app_user(request)
+    if redir:
+        return redir
+    bundle = load_dashboard_bundle()
+    return HTMLResponse(ui.page_orders(recent_orders_table(bundle, limit=100)))
+
+
+@app.get("/app/daily", response_class=HTMLResponse, response_model=None)
+def app_daily(request: Request) -> Response:
+    redir = _require_app_user(request)
+    if redir:
+        return redir
+    bundle = load_dashboard_bundle()
+    return HTMLResponse(ui.page_daily(recent_daily_table(bundle, limit=100)))
+
+
+@app.get("/app/marketing", response_class=HTMLResponse, response_model=None)
+def app_marketing(request: Request) -> Response:
+    redir = _require_app_user(request)
+    if redir:
+        return redir
+    bundle = load_dashboard_bundle()
+    return HTMLResponse(
+        ui.page_marketing(
+            recent_daily_table(bundle, limit=100)[[c for c in recent_daily_table(bundle, limit=100).columns if c in ("Date", "Ad_Spend", "Marketing_ROAS")]],
+            marketing_campaign_table(bundle, limit=100),
+        )
+    )
+
+
+@app.get("/app/accounting", response_class=HTMLResponse, response_model=None)
+def app_accounting(request: Request) -> Response:
+    redir = _require_app_user(request)
+    if redir:
+        return redir
+    bundle = load_dashboard_bundle()
+    return HTMLResponse(ui.page_accounting(bookkeeping_table(bundle, limit=36)))
+
+
+@app.get("/app/costs", response_class=HTMLResponse, response_model=None)
+def app_costs(request: Request) -> Response:
+    redir = _require_app_user(request)
+    if redir:
+        return redir
+    bundle = load_dashboard_bundle()
+    return HTMLResponse(ui.page_costs(missing_costs_table(bundle, limit=100)))
+
+
+@app.get("/app/jobs", response_class=HTMLResponse, response_model=None)
+def app_jobs(request: Request) -> Response:
+    redir = _require_app_user(request)
+    if redir:
+        return redir
+    bundle = load_dashboard_bundle()
+    return HTMLResponse(ui.page_jobs(run_status_rows(bundle)))
 
 
 @app.get("/app/login", response_class=HTMLResponse, response_model=None)
@@ -317,7 +395,26 @@ def app_naklady(request: Request) -> Response:
     redir = _require_app_user(request)
     if redir:
         return redir
-    return HTMLResponse(ui.page_naklady())
+    return RedirectResponse(url="/app/costs", status_code=302)
+
+
+def _run_pipeline_mode_html(mode: str, back_href: str = "/app/jobs") -> HTMLResponse:
+    try:
+        from pipeline import main
+
+        code = main(mode)
+        ok = code == 0
+        msg = (
+            f"Pipeline mód {mode} sa úspešne aktualizoval."
+            if ok
+            else f"Pipeline mód {mode} skončil s návratovým kódom {code}."
+        )
+        body = ui.page_message(ok=ok, title=f"Run {mode}", message=msg, back_href=back_href)
+        return HTMLResponse(body, status_code=200 if ok else 500)
+    except Exception as exc:
+        logger.exception("App pipeline failed for mode=%s", mode)
+        body = ui.page_message(ok=False, title=f"Chyba pipeline ({mode})", message=str(exc), back_href=back_href)
+        return HTMLResponse(body, status_code=500)
 
 
 @app.post("/app/report", response_class=HTMLResponse, response_model=None)
@@ -325,32 +422,18 @@ def app_report(request: Request) -> Response:
     redir = _require_app_user(request)
     if redir:
         return redir
-    try:
-        from pipeline import main
+    return _run_pipeline_mode_html("full", back_href="/app")
 
-        code = main()
-        ok = code == 0
-        msg = (
-            "Report sa úspešne aktualizoval."
-            if ok
-            else f"Pipeline skončil s návratovým kódom {code}."
-        )
-        body = ui.page_message(
-            ok=ok,
-            title="Report",
-            message=msg,
-            back_href="/app",
-        )
-        return HTMLResponse(body, status_code=200 if ok else 500)
-    except Exception as exc:
-        logger.exception("App pipeline failed")
-        body = ui.page_message(
-            ok=False,
-            title="Chyba pipeline",
-            message=str(exc),
-            back_href="/app",
-        )
-        return HTMLResponse(body, status_code=500)
+
+@app.post("/app/run/{mode}", response_class=HTMLResponse, response_model=None)
+def app_run_mode(request: Request, mode: str) -> Response:
+    redir = _require_app_user(request)
+    if redir:
+        return redir
+    mode_norm = (mode or "").strip().lower()
+    if mode_norm not in {"full", "core", "tracking", "reporting"}:
+        raise HTTPException(status_code=404, detail="Unknown pipeline mode")
+    return _run_pipeline_mode_html(mode_norm)
 
 
 @app.api_route("/cron", methods=["GET", "POST"])

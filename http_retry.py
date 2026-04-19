@@ -16,6 +16,12 @@ _SHOPIFY_403_HINT = (
     "new token includes that scope."
 )
 
+_SHOPIFY_401_HINT = (
+    " Check SHOPIFY_TOKEN (Custom App Admin API access token, usually starts with shpat_) "
+    "matches SHOPIFY_STORE (*.myshopify.com), Production env on Vercel, and redeploy. "
+    "401 = invalid or revoked token, or token for a different shop."
+)
+
 _META_OAUTH_HINT = (
     " Renew META_TOKEN in Vercel (or local .env): short-lived Graph tokens expire. "
     "Use a long-lived user token with ads_read, or re-run token exchange with a fresh short-lived token. "
@@ -125,6 +131,8 @@ def get_response(
                     msg = f"{msg} for {response.url}"
                 if response.status_code == 403 and "myshopify.com" in (response.url or ""):
                     msg = msg + _SHOPIFY_403_HINT
+                if response.status_code == 401 and "myshopify.com" in (response.url or ""):
+                    msg = msg + _SHOPIFY_401_HINT
                 raise RuntimeError(msg) from None
             return response
         except requests.RequestException as exc:

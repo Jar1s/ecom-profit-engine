@@ -10,7 +10,7 @@ from typing import Any
 from config import Settings
 from external_tracking import enrich_orders_carrier_tracking, order_tracking_columns
 from http_retry import get_response, post_graphql_admin
-from shopify_auth import get_shopify_access_token
+from shopify_auth import get_shopify_access_token, log_shopify_auth_once
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +244,10 @@ def fetch_all_orders(settings: Settings) -> list[dict[str, Any]]:
 
     while url:
         page += 1
-        headers = {"X-Shopify-Access-Token": get_shopify_access_token(settings)}
+        access_token = get_shopify_access_token(settings)
+        if page == 1:
+            log_shopify_auth_once(settings, access_token)
+        headers = {"X-Shopify-Access-Token": access_token}
         if url == base:
             response = get_response(url, settings=settings, params=params, headers=headers)
         else:

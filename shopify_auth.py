@@ -33,6 +33,19 @@ def get_shopify_access_token(settings: Settings) -> str:
     raise RuntimeError("Shopify auth: internal configuration error")
 
 
+def log_shopify_auth_once(settings: Settings, token: str) -> None:
+    """Safe fingerprint for Vercel logs (no full token). Call once per pipeline run."""
+    mode = "SHOPIFY_TOKEN" if settings.shopify_token else "client_credentials"
+    prefix = token[:10] if len(token) >= 10 else token
+    logger.info(
+        "Shopify auth: store=%s mode=%s token_len=%s token_prefix=%s",
+        settings.shopify_store,
+        mode,
+        len(token),
+        prefix,
+    )
+
+
 def _get_client_credentials_token(settings: Settings) -> str:
     global _cc_token, _cc_expires_at
     now = time.time()

@@ -180,6 +180,17 @@ def _strip_wrapped_quotes(raw: str) -> str:
     return s
 
 
+def _sanitize_shopify_secret(raw: str) -> str:
+    """
+    Normalize pasted secrets: quotes, outer trim, and any whitespace/newlines
+    (Vercel multiline or bad copy-paste) — Admin API tokens are a single token string.
+    """
+    s = _strip_wrapped_quotes(raw).strip()
+    if not s:
+        return ""
+    return "".join(s.split())
+
+
 def _env_bool(name: str, default: bool = True) -> bool:
     """False if env is 0/false/no/off (case-insensitive); True if unset or other."""
     raw = os.getenv(name)
@@ -219,9 +230,9 @@ def load_settings() -> Settings:
         google_creds_path = (_ROOT / creds).resolve()
         google_info = None
 
-    shopify_token = _strip_wrapped_quotes(os.getenv("SHOPIFY_TOKEN", "")).strip() or None
-    shopify_client_id = _strip_wrapped_quotes(os.getenv("SHOPIFY_CLIENT_ID", "")).strip() or None
-    shopify_client_secret = _strip_wrapped_quotes(os.getenv("SHOPIFY_CLIENT_SECRET", "")).strip() or None
+    shopify_token = _sanitize_shopify_secret(os.getenv("SHOPIFY_TOKEN", "")) or None
+    shopify_client_id = _sanitize_shopify_secret(os.getenv("SHOPIFY_CLIENT_ID", "")) or None
+    shopify_client_secret = _sanitize_shopify_secret(os.getenv("SHOPIFY_CLIENT_SECRET", "")) or None
 
     if shopify_token and (shopify_client_id or shopify_client_secret):
         raise RuntimeError(

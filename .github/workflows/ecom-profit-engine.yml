@@ -36,9 +36,7 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-        working-directory: ecom-profit-engine
       - name: Run core pipeline
-        working-directory: ecom-profit-engine
         env:
           PIPELINE_MODE: core
           PIPELINE_ENABLE_INCREMENTAL: '1'
@@ -71,9 +69,7 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-        working-directory: ecom-profit-engine
       - name: Run tracking pipeline
-        working-directory: ecom-profit-engine
         env:
           PIPELINE_MODE: tracking
           PIPELINE_ENABLE_INCREMENTAL: '1'
@@ -106,9 +102,7 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-        working-directory: ecom-profit-engine
       - name: Run reporting pipeline
-        working-directory: ecom-profit-engine
         env:
           PIPELINE_MODE: reporting
           PIPELINE_ENABLE_INCREMENTAL: '1'
@@ -139,9 +133,7 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         run: pip install -r requirements.txt
-        working-directory: ecom-profit-engine
       - name: Run full rebuild
-        working-directory: ecom-profit-engine
         env:
           PIPELINE_MODE: full
           PIPELINE_ENABLE_INCREMENTAL: '0'

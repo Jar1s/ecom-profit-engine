@@ -14,6 +14,7 @@ from data_quality import build_missing_supplier_costs_report, log_missing_suppli
 from meta_ads import fetch_meta_campaign_insights, fetch_meta_daily_spend
 from bookkeeping_us import bookkeeping_us_monthly
 from shopify_client import fetch_orders_and_line_rows
+from shopify_auth import log_shopify_auth_config
 from sheets import pause_between_sheet_uploads, replace_worksheet_simple, upload_dataframe
 from transform import (
     daily_summary_from_orders,
@@ -84,6 +85,7 @@ def main() -> int:
         )
 
         phase = "shopify"
+        log_shopify_auth_config(settings)
         logger.info("Fetching Shopify orders …")
         shopify_orders, line_rows = fetch_orders_and_line_rows(settings)
         logger.info("pipeline_phase=%s_ok line_rows=%s", phase, len(line_rows))
@@ -202,6 +204,8 @@ def main() -> int:
         )
         return 0
     except Exception as exc:
+        if phase == "shopify":
+            log_shopify_auth_config(settings)
         logger.exception("pipeline_failed phase=%s", phase)
         raise RuntimeError(f"[phase={phase}] {exc}") from exc
 

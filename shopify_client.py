@@ -10,7 +10,11 @@ from typing import Any
 from config import Settings
 from external_tracking import enrich_orders_carrier_tracking, order_tracking_columns
 from http_retry import get_response, post_graphql_admin
-from shopify_auth import get_shopify_access_token, log_shopify_auth_once
+from shopify_auth import (
+    get_shopify_access_token,
+    log_shopify_auth_once,
+    shopify_401_diagnostic_hint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -248,10 +252,17 @@ def fetch_all_orders(settings: Settings) -> list[dict[str, Any]]:
         if page == 1:
             log_shopify_auth_once(settings, access_token)
         headers = {"X-Shopify-Access-Token": access_token}
-        if url == base:
-            response = get_response(url, settings=settings, params=params, headers=headers)
-        else:
-            response = get_response(url, settings=settings, params=None, headers=headers)
+        try:
+            if url == base:
+                response = get_response(url, settings=settings, params=params, headers=headers)
+            else:
+                response = get_response(url, settings=settings, params=None, headers=headers)
+        except RuntimeError as exc:
+            if "HTTP 401" in str(exc):
+                raise RuntimeError(
+                    f"{exc}{shopify_401_diagnostic_hint(settings, access_token)}"
+                ) from None
+            raise
 
         payload = response.json()
         batch = payload.get("orders", [])

@@ -46,6 +46,52 @@ def log_shopify_auth_once(settings: Settings, token: str) -> None:
     )
 
 
+def log_shopify_auth_config(settings: Settings) -> None:
+    """Log sanitized auth configuration before the first Shopify request."""
+    mode = "SHOPIFY_TOKEN" if settings.shopify_token else "client_credentials"
+    static_token = settings.shopify_token or ""
+    logger.info(
+        "Shopify auth config: store=%s mode=%s static_token_present=%s "
+        "static_token_len=%s static_token_prefix=%s client_id_present=%s "
+        "client_secret_present=%s",
+        settings.shopify_store,
+        mode,
+        bool(static_token),
+        len(static_token),
+        static_token[:10] if static_token else "",
+        bool(settings.shopify_client_id),
+        bool(settings.shopify_client_secret),
+    )
+
+
+def shopify_401_diagnostic_hint(settings: Settings, token: str) -> str:
+    """Actionable, sanitized context for Shopify 401 responses."""
+    mode = "SHOPIFY_TOKEN" if settings.shopify_token else "client_credentials"
+    prefix = token[:10] if len(token) >= 10 else token
+    base = (
+        f" Shopify auth diagnostic: store={settings.shopify_store} mode={mode} "
+        f"token_len={len(token)} token_prefix={prefix}."
+    )
+    if settings.shopify_token:
+        hint = (
+            " Most likely: Production Vercel env has an old/revoked SHOPIFY_TOKEN, "
+            "the token belongs to a different shop than SHOPIFY_STORE, or a non-Admin "
+            "secret was pasted instead of the Custom App Admin API token."
+        )
+        if not token.startswith("shpat_"):
+            hint += " Token prefix is not shpat_; verify you pasted the Admin API access token."
+        hint += " Re-copy the token from Shopify Admin → custom app → API credentials, update Production env, and redeploy."
+        return base + hint
+    hint = (
+        " Token exchange succeeded, so the most likely issue is env mismatch: "
+        "SHOPIFY_STORE points to a different shop than the Dev Dashboard app/token, "
+        "or the wrong client ID/secret pair is configured in Production."
+        " Verify the app is installed on this exact store, the client ID and secret come "
+        "from the same app, and redeploy after fixing env."
+    )
+    return base + hint
+
+
 def _get_client_credentials_token(settings: Settings) -> str:
     global _cc_token, _cc_expires_at
     now = time.time()

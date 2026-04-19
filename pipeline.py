@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
 import sys
+import time
 
 import pandas as pd
 
@@ -62,6 +64,30 @@ _META_CAMPAIGN_COLUMNS = [
 ]
 
 
+def _fetch_shopify(settings):
+    logger.info("Fetching Shopify orders …")
+    started = time.perf_counter()
+    result = fetch_orders_and_line_rows(settings)
+    logger.info("timing_phase=shopify_fetch seconds=%.2f", time.perf_counter() - started)
+    return result
+
+
+def _fetch_meta_daily(settings):
+    logger.info("Fetching Meta Ads spend …")
+    started = time.perf_counter()
+    result = fetch_meta_daily_spend(settings)
+    logger.info("timing_phase=meta_fetch seconds=%.2f", time.perf_counter() - started)
+    return result
+
+
+def _fetch_meta_campaigns(settings):
+    logger.info("Fetching Meta campaign insights (spend + conversions) …")
+    started = time.perf_counter()
+    result = fetch_meta_campaign_insights(settings)
+    logger.info("timing_phase=meta_campaign_fetch seconds=%.2f", time.perf_counter() - started)
+    return result
+
+
 def main() -> int:
     try:
         settings = load_settings()
@@ -70,8 +96,10 @@ def main() -> int:
         return 1
 
     phase = "supplier_costs"
+    started_total = time.perf_counter()
     try:
         logger.info("Loading supplier costs from %s", settings.supplier_csv_path)
+        started = time.perf_counter()
         cost_maps = load_cost_maps(settings)
         logger.info(
             "pipeline_phase=%s_ok product_keys=%s sku_keys=%s sku_prefix_rules=%s "
@@ -83,39 +111,61 @@ def main() -> int:
             len(cost_maps.by_order_single),
             len(cost_maps.learned_by_product_sku),
         )
+        logger.info("timing_phase=supplier_costs seconds=%.2f", time.perf_counter() - started)
 
         phase = "shopify"
         log_shopify_auth_config(settings)
-        logger.info("Fetching Shopify orders …")
-        shopify_orders, line_rows = fetch_orders_and_line_rows(settings)
+        phase = "fetch_remote"
+        started = time.perf_counter()
+        max_workers = 3 if settings.meta_campaign_insights else 2
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            shopify_future = executor.submit(_fetch_shopify, settings)
+            meta_future = executor.submit(_fetch_meta_daily, settings)
+            meta_campaign_future = (
+                executor.submit(_fetch_meta_campaigns, settings)
+                if settings.meta_campaign_insights
+                else None
+            )
+
+            phase = "shopify"
+            shopify_orders, line_rows = shopify_future.result()
+            phase = "meta"
+            meta_rows = meta_future.result()
+            _mc_raw = meta_campaign_future.result() if meta_campaign_future else []
+        logger.info("timing_phase=fetch_remote seconds=%.2f", time.perf_counter() - started)
+
         logger.info("pipeline_phase=%s_ok line_rows=%s", phase, len(line_rows))
 
         phase = "enrich"
         logger.info("Enriching line items with costs …")
+        started = time.perf_counter()
         orders_df = enrich_usd_columns(
             enrich_line_items(line_rows, cost_maps),
             settings.usd_per_local,
         )
+        logger.info("timing_phase=enrich seconds=%.2f", time.perf_counter() - started)
 
         phase = "order_level"
         logger.info("Building order-level summary …")
+        started = time.perf_counter()
         order_df = enrich_usd_columns(
             order_level_summary(orders_df),
             settings.usd_per_local,
         )
+        logger.info("timing_phase=order_level seconds=%.2f", time.perf_counter() - started)
 
         phase = "daily"
         logger.info("Building daily summary …")
+        started = time.perf_counter()
         daily_df = daily_summary_from_orders(orders_df)
+        logger.info("timing_phase=daily seconds=%.2f", time.perf_counter() - started)
 
-        phase = "meta"
-        logger.info("Fetching Meta Ads spend …")
-        meta_rows = fetch_meta_daily_spend(settings)
         if settings.meta_spend_in_usd and not settings.usd_per_local:
             logger.warning(
                 "META_SPEND_IN_USD=1 but USD_PER_LOCAL_UNIT is unset: "
                 "daily merge may mix Meta USD with Shopify shop currency for ROAS."
             )
+        started = time.perf_counter()
         meta_df_all = enrich_meta_usd_columns(
             pd.DataFrame(meta_rows),
             usd_per_local=settings.usd_per_local,
@@ -126,20 +176,22 @@ def main() -> int:
             meta_df = meta_df_all[["Date", "Ad_Spend_USD"]].copy()
         else:
             meta_df = meta_df_all[["Date"]].copy() if "Date" in meta_df_all.columns else meta_df_all.copy()
+        logger.info("timing_phase=meta_transform seconds=%.2f", time.perf_counter() - started)
 
         meta_campaign_df = pd.DataFrame()
         if settings.meta_campaign_insights:
             phase = "meta_campaigns"
-            logger.info("Fetching Meta campaign insights (spend + conversions) …")
-            _mc_raw = fetch_meta_campaign_insights(settings)
+            started = time.perf_counter()
             meta_campaign_df = enrich_meta_usd_columns(
                 pd.DataFrame(_mc_raw) if _mc_raw else pd.DataFrame(columns=_META_CAMPAIGN_COLUMNS),
                 usd_per_local=settings.usd_per_local,
                 meta_spend_in_usd=settings.meta_spend_in_usd,
             )
+            logger.info("timing_phase=meta_campaign_transform seconds=%.2f", time.perf_counter() - started)
 
         phase = "merge_meta"
         logger.info("Merging daily summary with Meta spend …")
+        started = time.perf_counter()
         meta_for_merge = meta_rows_for_daily_merge(
             meta_rows,
             meta_spend_in_usd=settings.meta_spend_in_usd,
@@ -151,12 +203,16 @@ def main() -> int:
         )
         if settings.daily_summary_usd_primary:
             daily_final = daily_summary_usd_primary(daily_final)
+        logger.info("timing_phase=merge_meta seconds=%.2f", time.perf_counter() - started)
 
+        started = time.perf_counter()
         bookkeeping_df = bookkeeping_us_monthly(shopify_orders, orders_df, daily_final)
+        logger.info("timing_phase=bookkeeping seconds=%.2f", time.perf_counter() - started)
 
         phase = "sheets"
         _sheet_target = settings.google_sheet_id or settings.google_sheet_name
         logger.info("Uploading to Google Sheets %r …", _sheet_target)
+        started = time.perf_counter()
         missing_cost_df = build_missing_supplier_costs_report(orders_df)
         log_missing_supplier_costs(
             orders_df,
@@ -192,6 +248,7 @@ def main() -> int:
             SHEET_BOOKKEEPING,
             layout_kind="bookkeeping",
         )
+        logger.info("timing_phase=sheets seconds=%.2f", time.perf_counter() - started)
 
         logger.info(
             "Done. Line rows=%s, order rows=%s, meta days=%s, campaign rows=%s, daily rows=%s, bookkeeping months=%s",
@@ -202,6 +259,7 @@ def main() -> int:
             len(daily_final),
             len(bookkeeping_df),
         )
+        logger.info("timing_phase=total seconds=%.2f", time.perf_counter() - started_total)
         return 0
     except Exception as exc:
         if phase == "shopify":

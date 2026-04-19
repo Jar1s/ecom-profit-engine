@@ -140,6 +140,19 @@ def _format_shopify_token_error(r: requests.Response) -> str:
             "Install the app on the store (Shopify Admin → Settings → Apps), "
             "or use SHOPIFY_TOKEN from a custom app and remove SHOPIFY_CLIENT_ID/SECRET."
         )
+    if "application_cannot_be_found" in text.lower():
+        m = _HTML_OAUTH_ERR.search(text)
+        detail = f" ({m.group(1)}: {m.group(2).strip()})" if m else ""
+        return (
+            "application_cannot_be_found — per Shopify, client_credentials on "
+            "/admin/oauth/access_token is for apps from the Dev Dashboard (Partners); "
+            "merchant custom apps (Admin → Develop apps) must use token exchange or an "
+            "Admin API access token. Fix: set SHOPIFY_TOKEN to the shpat_ token from "
+            "Develop apps → API credentials and remove SHOPIFY_CLIENT_ID/SECRET; OR create "
+            "an app in partners.shopify.com, install it on the store, and use that app's "
+            "Client ID + Secret in GitHub. See Shopify docs: client-credentials-grant."
+            + detail
+        )
     m = _HTML_OAUTH_ERR.search(text)
     if m:
         return f"{m.group(1)}: {m.group(2).strip()}"

@@ -102,6 +102,37 @@ def _check_auth(request: Request) -> None:
     raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+def _masked_prefix(value: str, length: int = 10) -> str:
+    s = value.strip()
+    if not s:
+        return ""
+    return s[:length]
+
+
+def _shopify_env_debug_payload() -> dict[str, object]:
+    from config import load_settings
+
+    settings = load_settings()
+    mode = "SHOPIFY_TOKEN" if settings.shopify_token else "client_credentials"
+    token = settings.shopify_token or ""
+    client_id = settings.shopify_client_id or ""
+    client_secret = settings.shopify_client_secret or ""
+    return {
+        "shopify_store": settings.shopify_store,
+        "shopify_api_version": settings.shopify_api_version,
+        "auth_mode": mode,
+        "has_shopify_token": bool(token),
+        "shopify_token_len": len(token),
+        "shopify_token_prefix": _masked_prefix(token),
+        "has_client_id": bool(client_id),
+        "client_id_len": len(client_id),
+        "client_id_prefix": _masked_prefix(client_id),
+        "has_client_secret": bool(client_secret),
+        "client_secret_len": len(client_secret),
+        "client_secret_prefix": _masked_prefix(client_secret),
+    }
+
+
 # Vercel serverless request body limit is ~4.5 MB; stay under it.
 _MAX_BILL_UPLOAD_BYTES = 4 * 1024 * 1024
 
@@ -340,6 +371,17 @@ def run_pipeline(request: Request) -> JSONResponse:
             status_code=500,
             content={"ok": False, "error": str(exc)},
         )
+
+
+@app.get("/debug/shopify-env")
+def debug_shopify_env(request: Request) -> JSONResponse:
+    """Sanitized runtime view of Shopify auth env. Protected by the same auth as /cron."""
+    _check_auth(request)
+    try:
+        return JSONResponse(status_code=200, content={"ok": True, **_shopify_env_debug_payload()})
+    except Exception as exc:
+        logger.exception("Shopify env debug failed")
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
 
 
 @app.get("/supplier-import")

@@ -472,7 +472,14 @@ def _update_state_after_success(
 
 def _save_state_error(settings: Settings, state: PipelineState, mode: str, exc: Exception) -> None:
     summary = f"[mode={mode}] {str(exc).replace(chr(10), ' ')[:1000]}"
-    save_pipeline_state(settings, dc_replace(state, last_error_summary=summary))
+    try:
+        save_pipeline_state(settings, dc_replace(state, last_error_summary=summary))
+    except Exception as save_exc:
+        logger.warning(
+            "Could not write PIPELINE_STATE after pipeline failure (quota or API); "
+            "original error is still raised below: %s",
+            save_exc,
+        )
 
 
 def _run_full(settings: Settings, cost_maps) -> PipelineArtifacts:

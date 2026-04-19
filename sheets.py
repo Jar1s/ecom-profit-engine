@@ -64,8 +64,8 @@ def _inter_chunk_pause() -> None:
         time.sleep(sec)
 
 
-def _retry_sheet_write(fn: Callable[[], _T], *, what: str = "Sheets API") -> _T:
-    """Retry on HTTP 429 (rate limit / write quota per minute)."""
+def _retry_sheet_api(fn: Callable[[], _T], *, what: str = "Sheets API") -> _T:
+    """Retry on HTTP 429 (Sheets read/write quota per minute)."""
     max_attempts = 10
     for attempt in range(max_attempts):
         try:
@@ -85,6 +85,10 @@ def _retry_sheet_write(fn: Callable[[], _T], *, what: str = "Sheets API") -> _T:
                 time.sleep(delay)
                 continue
             raise
+
+
+# Backwards-compatible name (writes used this helper first)
+_retry_sheet_write = _retry_sheet_api
 
 
 def _authorize(settings: Settings) -> gspread.Client:
@@ -115,12 +119,15 @@ def _open_spreadsheet(client: gspread.Client, settings: Settings) -> gspread.Spr
     Title search uses Drive API; name must match the file title and the sheet must
     be shared with the service account (Editor).
     """
-    try:
+    def _open_once() -> gspread.Spreadsheet:
         if settings.google_sheet_id:
             return client.open_by_key(settings.google_sheet_id.strip())
         assert settings.google_sheet_name is not None
         name = settings.google_sheet_name.strip()
         return client.open(name)
+
+    try:
+        return _retry_sheet_api(_open_once, what="open spreadsheet")
     except gspread.exceptions.SpreadsheetNotFound as exc:
         sa_hint = (
             "Share the spreadsheet with the service account email (Editor) from the JSON."
@@ -151,10 +158,18 @@ def get_or_create_supplier_costs_worksheet(
     sh = _open_spreadsheet(client, settings)
     title = worksheet_title.strip()
     try:
-        return sh.worksheet(title)
+        return _retry_sheet_api(lambda: sh.worksheet(title), what="worksheet")
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=title, rows=3000, cols=10)
-        ws.append_row(["Product", "Cost", "SKU"], value_input_option="USER_ENTERED")
+        ws = _retry_sheet_api(
+            lambda: sh.add_worksheet(title=title, rows=3000, cols=10),
+            what="add_worksheet",
+        )
+        _retry_sheet_api(
+            lambda: ws.append_row(
+                ["Product", "Cost", "SKU"], value_input_option="USER_ENTERED"
+            ),
+            what="append_row",
+        )
         logger.info("Created supplier worksheet %r with header row", title)
         return ws
 
@@ -172,12 +187,12 @@ def try_read_worksheet_dataframe(
     try:
         client = _authorize(settings)
         sh = _open_spreadsheet(client, settings)
-        ws = sh.worksheet(title)
+        ws = _retry_sheet_api(lambda: sh.worksheet(title), what="worksheet")
     except Exception as exc:
         logger.debug("Worksheet %r not available: %s", title, exc)
         return None
     try:
-        values = ws.get_all_values()
+        values = _retry_sheet_api(lambda: ws.get_all_values(), what="read")
     except Exception as exc:
         logger.warning("Could not read worksheet %r: %s", title, exc)
         return None
@@ -229,9 +244,12 @@ def replace_worksheet_simple(
     client = _authorize(settings)
     sh = _open_spreadsheet(client, settings)
     try:
-        ws = sh.worksheet(worksheet_title)
+        ws = _retry_sheet_api(lambda: sh.worksheet(worksheet_title), what="worksheet")
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=worksheet_title, rows=3000, cols=10)
+        ws = _retry_sheet_api(
+            lambda: sh.add_worksheet(title=worksheet_title, rows=3000, cols=10),
+            what="add_worksheet",
+        )
         logger.info("Created worksheet %r", worksheet_title)
 
     df = df.copy()
@@ -331,9 +349,12 @@ def upload_dataframe(
         len(df.index),
     )
     try:
-        ws = sh.worksheet(worksheet_title)
+        ws = _retry_sheet_api(lambda: sh.worksheet(worksheet_title), what="worksheet")
     except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=worksheet_title, rows=3000, cols=40)
+        ws = _retry_sheet_api(
+            lambda: sh.add_worksheet(title=worksheet_title, rows=3000, cols=40),
+            what="add_worksheet",
+        )
         logger.info("Created worksheet %r", worksheet_title)
 
     df = df.copy()

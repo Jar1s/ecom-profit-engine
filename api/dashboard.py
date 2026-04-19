@@ -9,13 +9,17 @@ import pandas as pd
 from config import Settings, load_settings
 from pipeline import (
     SHEET_BOOKKEEPING,
+    SHEET_DAILY,
     SHEET_META_DATA,
     SHEET_META_CAMPAIGNS,
     SHEET_ORDER_LEVEL,
     SHEET_ORDERS_DB,
 )
 from pipeline_state import PipelineState, load_pipeline_state
+import logging
 from sheets import try_read_worksheet_dataframe
+
+logger = logging.getLogger("ecom_profit_engine.dashboard")
 
 
 @dataclass(frozen=True)
@@ -40,9 +44,14 @@ def _load_df(settings: Settings, tab: str, required: tuple[str, ...] | None = No
 
 def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
     settings = settings or load_settings()
+    try:
+        state = load_pipeline_state(settings)
+    except Exception as exc:
+        logger.warning("Could not load pipeline state for dashboard: %s", exc)
+        state = PipelineState(last_error_summary=f"Dashboard state unavailable: {exc}")
     return DashboardBundle(
         settings=settings,
-        state=load_pipeline_state(settings),
+        state=state,
         orders_df=_load_df(settings, SHEET_ORDERS_DB, ("Order_ID", "Line_Item_ID")),
         order_level_df=_load_df(settings, SHEET_ORDER_LEVEL, ("Order_ID",)),
         daily_df=_load_df(settings, SHEET_DAILY, ("Date",)),

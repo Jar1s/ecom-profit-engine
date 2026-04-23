@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -11,10 +13,8 @@ from config import Settings, load_settings
 from pipeline import (
     SHEET_BOOKKEEPING,
     SHEET_DAILY,
-    SHEET_META_DATA,
     SHEET_META_CAMPAIGNS,
     SHEET_ORDER_LEVEL,
-    SHEET_ORDERS_DB,
 )
 from pipeline_state import PipelineState, load_pipeline_state
 import logging
@@ -25,12 +25,12 @@ logger = logging.getLogger("ecom_profit_engine.dashboard")
 
 @dataclass(frozen=True)
 class DashboardBundle:
+    """Sheets needed for dashboard APIs only (not full ORDERS_DB / META_DATA — unused, slow)."""
+
     settings: Settings
     state: PipelineState
-    orders_df: pd.DataFrame
     order_level_df: pd.DataFrame
     daily_df: pd.DataFrame
-    meta_df: pd.DataFrame
     meta_campaigns_df: pd.DataFrame
     bookkeeping_df: pd.DataFrame
     missing_costs_df: pd.DataFrame
@@ -50,23 +50,53 @@ def dataframe_to_json_records(df: pd.DataFrame) -> list[dict[str, Any]]:
     return json.loads(df.to_json(orient="records", date_format="iso"))
 
 
-def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
-    settings = settings or load_settings()
+def _load_state_safe(settings: Settings) -> PipelineState:
     try:
-        state = load_pipeline_state(settings)
+        return load_pipeline_state(settings)
     except Exception as exc:
         logger.warning("Could not load pipeline state for dashboard: %s", exc)
-        state = PipelineState(last_error_summary=f"Dashboard state unavailable: {exc}")
+        return PipelineState(last_error_summary=f"Dashboard state unavailable: {exc}")
+
+
+def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
+    """
+    Load dashboard tabs in parallel. Each tab was previously opened sequentially (very slow).
+    ORDERS_DB and META_DATA are not used by any dashboard view — skip full-sheet reads.
+    """
+    settings = settings or load_settings()
+    missing_tab = settings.missing_supplier_costs_tab
+    specs: list[tuple[str, tuple[str, ...] | None]] = [
+        (SHEET_ORDER_LEVEL, ("Order_ID",)),
+        (SHEET_DAILY, ("Date",)),
+        (SHEET_META_CAMPAIGNS, ("Date",)),
+        (SHEET_BOOKKEEPING, ("Month",)),
+        (missing_tab, None),
+    ]
+    max_workers = max(
+        1,
+        min(int(os.getenv("DASHBOARD_SHEET_READ_CONCURRENCY", "10")), 16),
+    )
+
+    def _load_one(spec: tuple[str, tuple[str, ...] | None]) -> pd.DataFrame:
+        tab, req = spec
+        return _load_df(settings, tab, required=req)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        f_state = ex.submit(_load_state_safe, settings)
+        futures = [ex.submit(_load_one, s) for s in specs]
+        state = f_state.result()
+        order_level_df, daily_df, meta_campaigns_df, bookkeeping_df, missing_costs_df = (
+            f.result() for f in futures
+        )
+
     return DashboardBundle(
         settings=settings,
         state=state,
-        orders_df=_load_df(settings, SHEET_ORDERS_DB, ("Order_ID", "Line_Item_ID")),
-        order_level_df=_load_df(settings, SHEET_ORDER_LEVEL, ("Order_ID",)),
-        daily_df=_load_df(settings, SHEET_DAILY, ("Date",)),
-        meta_df=_load_df(settings, SHEET_META_DATA, ("Date",)),
-        meta_campaigns_df=_load_df(settings, SHEET_META_CAMPAIGNS, ("Date",)),
-        bookkeeping_df=_load_df(settings, SHEET_BOOKKEEPING, ("Month",)),
-        missing_costs_df=_load_df(settings, settings.missing_supplier_costs_tab),
+        order_level_df=order_level_df,
+        daily_df=daily_df,
+        meta_campaigns_df=meta_campaigns_df,
+        bookkeeping_df=bookkeeping_df,
+        missing_costs_df=missing_costs_df,
     )
 
 

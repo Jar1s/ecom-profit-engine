@@ -70,7 +70,7 @@ class Settings:
     shopify_fulfillment_refetch_early: bool  # Also refetch when only label_* / confirmed (extra API calls)
     shopify_graphql_fulfillment_verify: bool  # Admin GraphQL Fulfillment.displayStatus when REST not delivered
     shopify_graphql_verify_max: int  # Max GraphQL order lookups per run; 0 = no cap
-    track17_api_key: str | None  # 17TRACK API — carrier status beyond Shopify (optional)
+    track17_api_key: str | None  # 17TRACK API — carrier status beyond Shopify (optional); None if disabled
     track17_max_trackings_per_run: int  # Max distinct tracking numbers per pipeline run (0 = no cap)
     pipeline_mode: str  # full | core | tracking | reporting
     pipeline_enable_incremental: bool
@@ -276,6 +276,11 @@ def load_settings() -> Settings:
             "GOOGLE_SHEET_ID or GOOGLE_SHEET_URL (open by id; only Sheets API required)."
         )
 
+    track17_enabled = _env_bool("TRACK17_ENABLED", True)
+    track17_api_key = os.getenv("TRACK17_API_KEY", "").strip() or None
+    if not track17_enabled:
+        track17_api_key = None
+
     return Settings(
         shopify_store=shopify_store,
         shopify_token=shopify_token,
@@ -327,7 +332,7 @@ def load_settings() -> Settings:
         shopify_fulfillment_refetch_early=_env_bool("SHOPIFY_FULFILLMENT_REFETCH_EARLY", False),
         shopify_graphql_fulfillment_verify=_env_bool("SHOPIFY_GRAPHQL_FULFILLMENT_VERIFY", True),
         shopify_graphql_verify_max=_optional_int("SHOPIFY_GRAPHQL_VERIFY_MAX", 500),
-        track17_api_key=os.getenv("TRACK17_API_KEY", "").strip() or None,
+        track17_api_key=track17_api_key,
         # 0 = no cap (query all distinct tracking numbers in the run). Set a positive limit to protect API quota.
         track17_max_trackings_per_run=_optional_int("TRACK17_MAX_TRACKINGS_PER_RUN", 0),
         pipeline_mode=(os.getenv("PIPELINE_MODE", "full").strip().lower() or "full"),

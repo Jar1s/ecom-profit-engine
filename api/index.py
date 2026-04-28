@@ -18,6 +18,7 @@ if _ROOT not in sys.path:
 from . import ui
 from .dashboard import (
     bookkeeping_table,
+    dashboard_executive_thresholds,
     dataframe_to_json_records,
     load_dashboard_bundle,
     marketing_campaign_table,
@@ -383,6 +384,7 @@ def api_app_dashboard(request: Request) -> JSONResponse:
             "runs": run_status_rows(bundle),
             "recent_orders": dataframe_to_json_records(recent_orders_table(bundle)),
             "recent_daily": dataframe_to_json_records(recent_daily_table(bundle)),
+            "executive_thresholds": dashboard_executive_thresholds(),
         }
     )
 

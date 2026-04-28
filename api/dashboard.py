@@ -130,6 +130,19 @@ def _fmt_ratio(value: float | int | None) -> str:
     return f"{float(value):.2f}x"
 
 
+def _fmt_timestamp_short(value: str | None) -> str:
+    if not value:
+        return "—"
+    s = str(value).strip()
+    if not s:
+        return "—"
+    try:
+        parsed = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return parsed.strftime("%d.%m %H:%M")
+    except Exception:
+        return s[:16] if len(s) > 16 else s
+
+
 def _recent_window(df: pd.DataFrame, days: int = 30) -> pd.DataFrame:
     if df.empty or "Date" not in df.columns:
         return df
@@ -145,6 +158,64 @@ def _latest_timestamp(*values: str) -> str | None:
     if not valid:
         return None
     return max(valid)
+
+
+_EXEC_THRESH_DEFAULTS: dict[str, dict[str, Any]] = {
+    "ROAS 30d": {"mode": "higher_better", "green": 2.0, "amber": 1.4},
+    "Gross Margin": {"mode": "higher_better", "green": 35.0, "amber": 25.0},
+    "Ad Share": {"mode": "lower_better", "green": 20.0, "amber": 30.0},
+    "Delivery Rate": {"mode": "higher_better", "green": 85.0, "amber": 70.0},
+    "Undelivered": {"mode": "lower_better", "green": 15.0, "amber": 30.0},
+    "Undelivered Now": {"mode": "lower_better", "green": 15.0, "amber": 30.0},
+    "Undelivered 30d": {"mode": "lower_better", "green": 60.0, "amber": 120.0},
+    "Avg Transit Days": {"mode": "lower_better", "green": 5.0, "amber": 8.0},
+    "Profit After Ads": {"mode": "higher_better", "green": 0.0, "amber": -500.0},
+}
+
+
+def _merge_threshold_row(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any] | None:
+    mode = patch.get("mode", base.get("mode"))
+    if mode not in ("higher_better", "lower_better"):
+        mode = base.get("mode")
+    if mode not in ("higher_better", "lower_better"):
+        return None
+    green = patch.get("green", base.get("green"))
+    amber = patch.get("amber", base.get("amber"))
+    try:
+        g = float(green)
+        a = float(amber)
+    except (TypeError, ValueError):
+        return None
+    return {"mode": str(mode), "green": g, "amber": a}
+
+
+def dashboard_executive_thresholds() -> dict[str, dict[str, Any]]:
+    """
+    Traffic-light thresholds for /app dashboard (executive KPIs).
+
+    Override via env ``DASHBOARD_EXECUTIVE_THRESHOLDS_JSON`` — JSON object keyed by metric label,
+    values are partial objects with optional ``mode``, ``green``, ``amber`` (merged onto defaults).
+    """
+    out: dict[str, dict[str, Any]] = {k: dict(v) for k, v in _EXEC_THRESH_DEFAULTS.items()}
+    raw = (os.getenv("DASHBOARD_EXECUTIVE_THRESHOLDS_JSON") or "").strip()
+    if not raw:
+        return out
+    try:
+        overrides = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        logger.warning("Invalid DASHBOARD_EXECUTIVE_THRESHOLDS_JSON: %s", exc)
+        return out
+    if not isinstance(overrides, dict):
+        return out
+    for key, patch in overrides.items():
+        if not isinstance(key, str) or key not in out:
+            continue
+        if not isinstance(patch, dict):
+            continue
+        merged = _merge_threshold_row(out[key], patch)
+        if merged:
+            out[key] = merged
+    return out
 
 
 def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
@@ -183,16 +254,32 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
         {"label": "ROAS 30d", "value": _fmt_ratio(roas_30), "meta": "Revenue / Ad Spend"},
         {"label": "Orders 30d", "value": _fmt_int(orders_30), "meta": f"Delivered {_fmt_int(delivered_30)}"},
         {"label": "Undelivered", "value": _fmt_int(undelivered_now), "meta": "aktívne order-level"},
-        {"label": "Last Sync", "value": last_sync or "—", "meta": bundle.state.last_successful_run_kind or "bez state"},
+        {
+            "label": "Last Sync",
+            "value": _fmt_timestamp_short(last_sync),
+            "meta": bundle.state.last_successful_run_kind or "bez state",
+        },
         {"label": "Operating Income", "value": _fmt_money(latest_operating_income), "meta": latest_month or "BOOKKEEPING"},
     ]
 
 
 def run_status_rows(bundle: DashboardBundle) -> list[dict[str, str]]:
     rows = [
-        {"job": "core", "last_run": bundle.state.last_core_sync_at or "—", "purpose": "Shopify + supplier + daily Meta + hlavné taby"},
-        {"job": "tracking", "last_run": bundle.state.last_tracking_sync_at or "—", "purpose": "17TRACK + delivery refresh"},
-        {"job": "reporting", "last_run": bundle.state.last_reporting_sync_at or "—", "purpose": "META_CAMPAIGNS + BOOKKEEPING"},
+        {
+            "job": "core",
+            "last_run": _fmt_timestamp_short(bundle.state.last_core_sync_at),
+            "purpose": "Shopify + supplier + daily Meta + hlavné taby",
+        },
+        {
+            "job": "tracking",
+            "last_run": _fmt_timestamp_short(bundle.state.last_tracking_sync_at),
+            "purpose": "17TRACK + delivery refresh",
+        },
+        {
+            "job": "reporting",
+            "last_run": _fmt_timestamp_short(bundle.state.last_reporting_sync_at),
+            "purpose": "META_CAMPAIGNS + BOOKKEEPING",
+        },
     ]
     if bundle.state.last_error_summary:
         rows.append({"job": "last_error", "last_run": "recent", "purpose": bundle.state.last_error_summary})

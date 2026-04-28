@@ -10,3 +10,7 @@ Internal `/app` UI: **Next.js 15** (App Router), **`output: 'export'`**, **`base
 ## Production build
 
 From this directory: `npm run build` (runs `next build` + `scripts/export-to-static-app.mjs`).
+
+## Executive traffic-light thresholds
+
+Server env `DASHBOARD_EXECUTIVE_THRESHOLDS_JSON` (JSON object) merges partial overrides onto defaults in `api/dashboard.py` and is returned on `GET /api/app/dashboard` as `executive_thresholds`. Change on Vercel without rebuilding the static export.

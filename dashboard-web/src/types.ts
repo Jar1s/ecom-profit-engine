@@ -11,12 +11,19 @@ export type RunRow = { job: string; last_run: string; purpose: string };
 
 export type RunResponse = { runs: RunRow[] };
 
+export type ExecutiveThreshold = {
+  mode: "higher_better" | "lower_better";
+  green: number;
+  amber: number;
+};
+
 export type DashboardResponse = {
   status: UiStatus;
   cards: KpiCard[];
   runs: RunRow[];
   recent_orders: Record<string, unknown>[];
   recent_daily: Record<string, unknown>[];
+  executive_thresholds?: Record<string, ExecutiveThreshold>;
 };
 
 export type RowsResponse = { rows: Record<string, unknown>[] };

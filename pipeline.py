@@ -114,6 +114,47 @@ def _timed(phase: str, fn):
     return result
 
 
+def _runtime_budget_seconds() -> float:
+    """
+    Soft guard against hard platform timeout (e.g. Vercel 300s).
+    PIPELINE_RUNTIME_BUDGET_SECONDS:
+      - <= 0: disabled
+      - unset + Vercel runtime: defaults to 285s
+      - unset outside Vercel: disabled
+    """
+    raw = (os.getenv("PIPELINE_RUNTIME_BUDGET_SECONDS") or "").strip()
+    if raw:
+        try:
+            v = float(raw)
+        except ValueError:
+            logger.warning("Invalid PIPELINE_RUNTIME_BUDGET_SECONDS=%r; runtime guard disabled", raw)
+            return 0.0
+        return v if v > 0 else 0.0
+    if (os.getenv("VERCEL") or "").strip() == "1":
+        return 285.0
+    return 0.0
+
+
+def _check_runtime_budget(
+    started_total: float,
+    *,
+    step: str,
+    estimated_seconds: float = 0.0,
+) -> None:
+    budget = _runtime_budget_seconds()
+    if budget <= 0:
+        return
+    elapsed = time.perf_counter() - started_total
+    remaining = budget - elapsed
+    if remaining <= max(0.0, estimated_seconds):
+        raise RuntimeError(
+            "runtime budget reached before step="
+            f"{step} (elapsed={elapsed:.1f}s, budget={budget:.1f}s, remaining={remaining:.1f}s). "
+            "Use PIPELINE_MODE=core/tracking/reporting, disable heavy sheets formatting "
+            "(SHEETS_FANCY_LAYOUT=0, SHEETS_CONDITIONAL_FORMAT=0), or increase function timeout."
+        )
+
+
 def _fetch_meta_daily(settings: Settings) -> list[dict[str, Any]]:
     logger.info("Fetching Meta Ads spend …")
     return _timed("meta_fetch", lambda: fetch_meta_daily_spend(settings))
@@ -393,48 +434,126 @@ def _build_artifacts(
     )
 
 
-def _upload_core_tabs(settings: Settings, artifacts: PipelineArtifacts) -> None:
+def _upload_core_tabs(settings: Settings, artifacts: PipelineArtifacts, *, started_total: float) -> None:
+    def _run_step(step: str, fn, *, estimate: float = 0.0) -> None:
+        _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
+        fn()
+
     log_missing_supplier_costs(
         artifacts.orders_df,
         artifacts.missing_cost_df,
         sheet_tab=settings.missing_supplier_costs_tab,
     )
     if settings.missing_supplier_costs_tab:
-        replace_worksheet_simple(settings, settings.missing_supplier_costs_tab, artifacts.missing_cost_df)
+        _run_step(
+            "sheet_missing_supplier_costs",
+            lambda: replace_worksheet_simple(settings, settings.missing_supplier_costs_tab, artifacts.missing_cost_df),
+            estimate=3.0,
+        )
         pause_between_sheet_uploads()
-    upload_dataframe(settings, artifacts.orders_df, SHEET_ORDERS_DB, layout_kind="orders")
+    _run_step(
+        "sheet_orders_db",
+        lambda: upload_dataframe(settings, artifacts.orders_df, SHEET_ORDERS_DB, layout_kind="orders"),
+        estimate=20.0,
+    )
     pause_between_sheet_uploads()
-    upload_dataframe(settings, artifacts.order_df, SHEET_ORDER_LEVEL, layout_kind="order_level")
+    _run_step(
+        "sheet_order_level",
+        lambda: upload_dataframe(settings, artifacts.order_df, SHEET_ORDER_LEVEL, layout_kind="order_level"),
+        estimate=20.0,
+    )
     pause_between_sheet_uploads()
-    upload_dataframe(settings, artifacts.meta_df, SHEET_META_DATA, layout_kind="meta")
+    _run_step(
+        "sheet_meta_data",
+        lambda: upload_dataframe(settings, artifacts.meta_df, SHEET_META_DATA, layout_kind="meta"),
+        estimate=10.0,
+    )
     pause_between_sheet_uploads()
-    upload_dataframe(settings, artifacts.daily_final, SHEET_DAILY, layout_kind="daily")
+    _run_step(
+        "sheet_daily_summary",
+        lambda: upload_dataframe(settings, artifacts.daily_final, SHEET_DAILY, layout_kind="daily"),
+        estimate=10.0,
+    )
 
 
-def _upload_tracking_tabs(settings: Settings, artifacts: PipelineArtifacts) -> None:
-    upload_dataframe(settings, artifacts.orders_df, SHEET_ORDERS_DB, layout_kind="orders")
+def _upload_tracking_tabs(settings: Settings, artifacts: PipelineArtifacts, *, started_total: float) -> None:
+    def _run_step(step: str, fn, *, estimate: float = 0.0) -> None:
+        _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
+        fn()
+
+    _run_step(
+        "sheet_orders_db",
+        lambda: upload_dataframe(settings, artifacts.orders_df, SHEET_ORDERS_DB, layout_kind="orders"),
+        estimate=20.0,
+    )
     pause_between_sheet_uploads()
-    upload_dataframe(settings, artifacts.order_df, SHEET_ORDER_LEVEL, layout_kind="order_level")
+    _run_step(
+        "sheet_order_level",
+        lambda: upload_dataframe(settings, artifacts.order_df, SHEET_ORDER_LEVEL, layout_kind="order_level"),
+        estimate=20.0,
+    )
     pause_between_sheet_uploads()
-    upload_dataframe(settings, artifacts.daily_final, SHEET_DAILY, layout_kind="daily")
+    _run_step(
+        "sheet_daily_summary",
+        lambda: upload_dataframe(settings, artifacts.daily_final, SHEET_DAILY, layout_kind="daily"),
+        estimate=10.0,
+    )
 
 
-def _upload_reporting_tabs(settings: Settings, artifacts: PipelineArtifacts) -> None:
-    upload_dataframe(settings, artifacts.meta_df, SHEET_META_DATA, layout_kind="meta")
+def _upload_reporting_tabs(settings: Settings, artifacts: PipelineArtifacts, *, started_total: float) -> None:
+    def _run_step(step: str, fn, *, estimate: float = 0.0) -> None:
+        _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
+        fn()
+
+    _run_step(
+        "sheet_meta_data",
+        lambda: upload_dataframe(settings, artifacts.meta_df, SHEET_META_DATA, layout_kind="meta"),
+        estimate=10.0,
+    )
     pause_between_sheet_uploads()
     if not artifacts.meta_campaign_df.empty or settings.meta_campaign_insights:
-        upload_dataframe(settings, artifacts.meta_campaign_df, SHEET_META_CAMPAIGNS, layout_kind="meta_campaigns")
+        _run_step(
+            "sheet_meta_campaigns",
+            lambda: upload_dataframe(
+                settings,
+                artifacts.meta_campaign_df,
+                SHEET_META_CAMPAIGNS,
+                layout_kind="meta_campaigns",
+            ),
+            estimate=10.0,
+        )
         pause_between_sheet_uploads()
-    upload_dataframe(settings, artifacts.bookkeeping_df, SHEET_BOOKKEEPING, layout_kind="bookkeeping")
+    _run_step(
+        "sheet_bookkeeping",
+        lambda: upload_dataframe(settings, artifacts.bookkeeping_df, SHEET_BOOKKEEPING, layout_kind="bookkeeping"),
+        estimate=10.0,
+    )
 
 
-def _upload_full_tabs(settings: Settings, artifacts: PipelineArtifacts) -> None:
-    _upload_core_tabs(settings, artifacts)
+def _upload_full_tabs(settings: Settings, artifacts: PipelineArtifacts, *, started_total: float) -> None:
+    def _run_step(step: str, fn, *, estimate: float = 0.0) -> None:
+        _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
+        fn()
+
+    _upload_core_tabs(settings, artifacts, started_total=started_total)
     pause_between_sheet_uploads()
     if settings.meta_campaign_insights:
-        upload_dataframe(settings, artifacts.meta_campaign_df, SHEET_META_CAMPAIGNS, layout_kind="meta_campaigns")
+        _run_step(
+            "sheet_meta_campaigns",
+            lambda: upload_dataframe(
+                settings,
+                artifacts.meta_campaign_df,
+                SHEET_META_CAMPAIGNS,
+                layout_kind="meta_campaigns",
+            ),
+            estimate=10.0,
+        )
         pause_between_sheet_uploads()
-    upload_dataframe(settings, artifacts.bookkeeping_df, SHEET_BOOKKEEPING, layout_kind="bookkeeping")
+    _run_step(
+        "sheet_bookkeeping",
+        lambda: upload_dataframe(settings, artifacts.bookkeeping_df, SHEET_BOOKKEEPING, layout_kind="bookkeeping"),
+        estimate=10.0,
+    )
 
 
 def _update_state_after_success(
@@ -683,25 +802,25 @@ def main(mode_override: str | None = None) -> int:
             artifacts = _run_full(settings, cost_maps)
             phase = "sheets"
             logger.info("Uploading to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
-            _timed("sheets", lambda: _upload_full_tabs(settings, artifacts))
+            _timed("sheets", lambda: _upload_full_tabs(settings, artifacts, started_total=started_total))
         elif mode == "core":
             phase = "core"
             artifacts = _run_core(settings, cost_maps, state)
             phase = "sheets_core"
             logger.info("Uploading core tabs to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
-            _timed("sheets", lambda: _upload_core_tabs(settings, artifacts))
+            _timed("sheets", lambda: _upload_core_tabs(settings, artifacts, started_total=started_total))
         elif mode == "tracking":
             phase = "tracking"
             artifacts = _run_tracking(settings, cost_maps, state)
             phase = "sheets_tracking"
             logger.info("Uploading tracking tabs to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
-            _timed("sheets", lambda: _upload_tracking_tabs(settings, artifacts))
+            _timed("sheets", lambda: _upload_tracking_tabs(settings, artifacts, started_total=started_total))
         else:
             phase = "reporting"
             artifacts = _run_reporting(settings, cost_maps, state)
             phase = "sheets_reporting"
             logger.info("Uploading reporting tabs to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
-            _timed("sheets", lambda: _upload_reporting_tabs(settings, artifacts))
+            _timed("sheets", lambda: _upload_reporting_tabs(settings, artifacts, started_total=started_total))
 
         if settings.pipeline_enable_parity_check:
             phase = "parity"

@@ -39,8 +39,11 @@ app = FastAPI(title="Ecom Profit Engine")
 
 _STATIC_APP_DIR = os.path.join(_ROOT, "static", "app")
 _STATIC_APP_ASSETS = os.path.join(_STATIC_APP_DIR, "assets")
+_STATIC_APP_NEXT = os.path.join(_STATIC_APP_DIR, "_next")
 if os.path.isdir(_STATIC_APP_ASSETS):
     app.mount("/app/assets", StaticFiles(directory=_STATIC_APP_ASSETS), name="app_assets")
+if os.path.isdir(_STATIC_APP_NEXT):
+    app.mount("/app/_next", StaticFiles(directory=_STATIC_APP_NEXT), name="app_next_static")
 
 
 def _session_signing_secret() -> str:
@@ -86,12 +89,27 @@ def _require_app_session_api(request: Request) -> None:
     raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-def _spa_index_response() -> FileResponse:
-    path = os.path.join(_STATIC_APP_DIR, "index.html")
+def _spa_export_html_path(request: Request) -> str:
+    """Next `output: export` emits `index.html` plus `{route}.html` per top-level segment."""
+    path = request.url.path.rstrip("/") or "/app"
+    if path == "/app":
+        return os.path.join(_STATIC_APP_DIR, "index.html")
+    if path.startswith("/app/"):
+        segment = path.removeprefix("/app/").split("/")[0]
+        allowed = {"orders", "daily", "marketing", "accounting", "costs", "jobs"}
+        if segment in allowed:
+            candidate = os.path.join(_STATIC_APP_DIR, f"{segment}.html")
+            if os.path.isfile(candidate):
+                return candidate
+    return os.path.join(_STATIC_APP_DIR, "index.html")
+
+
+def _spa_index_response(request: Request) -> FileResponse:
+    path = _spa_export_html_path(request)
     if not os.path.isfile(path):
         raise HTTPException(
             status_code=503,
-            detail="Frontend nie je zbuildovaný. Spusti: cd web && npm install && npm run build",
+            detail="Frontend nie je zbuildovaný. Spusti: cd dashboard-web && npm ci && npm run build",
         )
     return FileResponse(path)
 
@@ -133,7 +151,7 @@ def _app_shell_response(request: Request) -> Response:
     if redir:
         return redir
     if os.path.isfile(os.path.join(_STATIC_APP_DIR, "index.html")):
-        return _spa_index_response()
+        return _spa_index_response(request)
     return _legacy_app_html(request)
 
 
@@ -457,6 +475,14 @@ def api_app_run(request: Request, mode: str) -> JSONResponse:
 @app.get("/app/jobs", response_model=None)
 def app_shell(request: Request) -> Response:
     return _app_shell_response(request)
+
+
+@app.get("/app/favicon.ico", response_model=None)
+def app_favicon() -> FileResponse:
+    path = os.path.join(_STATIC_APP_DIR, "favicon.ico")
+    if os.path.isfile(path):
+        return FileResponse(path)
+    raise HTTPException(status_code=404, detail="Not found")
 
 
 @app.get("/app/login", response_class=HTMLResponse, response_model=None)

@@ -11,3 +11,5 @@ venv/
 .DS_Store
 static/app/
 web/node_modules/
+dashboard-web/node_modules/
+dashboard-web/.next/

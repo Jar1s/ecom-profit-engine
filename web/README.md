@@ -1,5 +1,7 @@
 # React + TypeScript + Vite
 
+> **Deprecated:** The production `/app` UI is built from [`dashboard-web/`](../dashboard-web/) (Next.js static export). This Vite app is no longer used in `vercel.json`.
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:

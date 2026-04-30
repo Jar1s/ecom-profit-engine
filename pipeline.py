@@ -363,6 +363,19 @@ def _meta_frame_to_rows(meta_df: pd.DataFrame, settings: Settings) -> list[dict[
     return src.to_dict(orient="records")
 
 
+def _merge_meta_rows_with_existing(settings: Settings, fresh_meta_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Preserve historical META_DATA rows outside the current API range.
+
+    Meta fetches are range-based. A short lookback should update overlapping dates but must not
+    delete older spend rows that are still needed for DAILY_SUMMARY / bookkeeping history.
+    """
+    existing = _load_meta_df(settings)
+    fresh = _build_meta_df(fresh_meta_rows, settings)
+    merged = _merge_meta_df(existing, fresh)
+    return _meta_frame_to_rows(merged, settings)
+
+
 def _final_tracking_row(row: pd.Series) -> bool:
     delivery = str(row.get("Delivery_Status") or "").strip().lower()
     shipment = str(row.get("Shipment_Status") or "").strip().lower()
@@ -670,6 +683,7 @@ def _run_full(settings: Settings, cost_maps) -> PipelineArtifacts:
         shopify_orders, line_rows = shopify_future.result()
         meta_rows = meta_future.result()
         meta_campaign_rows = meta_campaign_future.result() if meta_campaign_future else None
+    meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
     return _build_artifacts(
         settings,
         cost_maps,
@@ -693,6 +707,7 @@ def _run_core(settings: Settings, cost_maps, state: PipelineState) -> PipelineAr
         meta_future = executor.submit(_fetch_meta_daily_safe, settings)
         changed_orders, changed_rows = shopify_future.result()
         meta_rows = meta_future.result()
+    meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
     merged_orders_df = _merge_orders_df(
         existing_orders_df,
         enrich_usd_columns(enrich_line_items(changed_rows, cost_maps), settings.usd_per_local),
@@ -733,6 +748,7 @@ def _run_tracking(settings: Settings, cost_maps, state: PipelineState) -> Pipeli
         meta_future = executor.submit(_fetch_meta_daily_safe, settings)
         raw_orders = orders_future.result()
         meta_rows = meta_future.result()
+    meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
     refreshed_orders, refreshed_rows = fetch_orders_and_line_rows(settings_tracking, orders=raw_orders)
     merged_orders_df = _merge_orders_df(
         existing_orders_df,
@@ -761,6 +777,7 @@ def _run_reporting(settings: Settings, cost_maps, state: PipelineState) -> Pipel
         shopify_orders = shopify_future.result()
         meta_rows = meta_future.result()
         meta_campaign_rows = meta_campaign_future.result()
+    meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
     return _build_artifacts(
         settings,
         cost_maps,

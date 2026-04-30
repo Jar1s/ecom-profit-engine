@@ -7,7 +7,13 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from pipeline import _load_meta_df, _load_orders_db_df, _tracking_candidate_order_ids, _updated_at_min_from_state
+from pipeline import (
+    _load_meta_df,
+    _load_orders_db_df,
+    _merge_meta_rows_with_existing,
+    _tracking_candidate_order_ids,
+    _updated_at_min_from_state,
+)
 from pipeline_state import PipelineState, load_pipeline_state, save_pipeline_state
 
 
@@ -99,3 +105,19 @@ class PipelineSheetLoadTests(TestCase):
             out = _load_meta_df(settings)  # type: ignore[arg-type]
         self.assertEqual(read_df.call_args.kwargs["required_headers"], ("Date",))
         self.assertEqual(out["Ad_Spend_USD"].iloc[0], 12.34)
+
+    def test_merge_meta_rows_preserves_existing_dates_outside_fresh_range(self) -> None:
+        settings = SimpleNamespace(usd_per_local=None, meta_spend_in_usd=True)
+        existing = pd.DataFrame(
+            [
+                {"Date": "2026-01-01", "Ad_Spend_USD": "5.00"},
+                {"Date": "2026-04-30", "Ad_Spend_USD": "10.00"},
+            ]
+        )
+        fresh = [{"Date": "2026-04-30", "Ad_Spend": 12.5}, {"Date": "2026-05-01", "Ad_Spend": 7.0}]
+        with patch("pipeline._load_meta_df", return_value=existing):
+            rows = _merge_meta_rows_with_existing(settings, fresh)  # type: ignore[arg-type]
+        by_date = {row["Date"]: row["Ad_Spend"] for row in rows}
+        self.assertEqual(by_date["2026-01-01"], 5.0)
+        self.assertEqual(by_date["2026-04-30"], 12.5)
+        self.assertEqual(by_date["2026-05-01"], 7.0)

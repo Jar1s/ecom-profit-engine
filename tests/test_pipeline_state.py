@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from pipeline import _tracking_candidate_order_ids, _updated_at_min_from_state
+from pipeline import _load_meta_df, _load_orders_db_df, _tracking_candidate_order_ids, _updated_at_min_from_state
 from pipeline_state import PipelineState, load_pipeline_state, save_pipeline_state
 
 
@@ -66,3 +66,36 @@ class TrackingCandidateTests(TestCase):
         )
         out = _tracking_candidate_order_ids(settings, df)  # type: ignore[arg-type]
         self.assertEqual(out, [2])
+
+
+class PipelineSheetLoadTests(TestCase):
+    def test_load_orders_db_finds_table_header_in_fancy_layout(self) -> None:
+        settings = SimpleNamespace()
+        raw = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-04-30",
+                    "Order": "#1001",
+                    "Order_ID": "1001",
+                    "Line_Item_ID": "2001",
+                    "Quantity": "1",
+                    "Revenue": "19.99",
+                    "Product_Cost": "9.5",
+                    "Gross_Profit": "10.49",
+                    "Days_In_Transit": "",
+                }
+            ]
+        )
+        with patch("pipeline.try_read_worksheet_dataframe", return_value=raw) as read_df:
+            out = _load_orders_db_df(settings)  # type: ignore[arg-type]
+        self.assertEqual(read_df.call_args.kwargs["required_headers"], ("Order_ID", "Line_Item_ID"))
+        self.assertEqual(out["Order_ID"].iloc[0], 1001)
+        self.assertEqual(out["Line_Item_ID"].iloc[0], 2001)
+
+    def test_load_meta_df_finds_date_header_in_fancy_layout(self) -> None:
+        settings = SimpleNamespace()
+        raw = pd.DataFrame([{"Date": "2026-04-30", "Ad_Spend_USD": "12.34"}])
+        with patch("pipeline.try_read_worksheet_dataframe", return_value=raw) as read_df:
+            out = _load_meta_df(settings)  # type: ignore[arg-type]
+        self.assertEqual(read_df.call_args.kwargs["required_headers"], ("Date",))
+        self.assertEqual(out["Ad_Spend_USD"].iloc[0], 12.34)

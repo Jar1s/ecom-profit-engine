@@ -279,7 +279,11 @@ def _coerce_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 
 def _load_orders_db_df(settings: Settings) -> pd.DataFrame:
-    df = try_read_worksheet_dataframe(settings, SHEET_ORDERS_DB)
+    df = try_read_worksheet_dataframe(
+        settings,
+        SHEET_ORDERS_DB,
+        required_headers=("Order_ID", "Line_Item_ID"),
+    )
     if df is None or df.empty:
         return _empty_orders_df()
     out = df.copy()
@@ -299,7 +303,11 @@ def _load_orders_db_df(settings: Settings) -> pd.DataFrame:
 
 
 def _load_meta_df(settings: Settings) -> pd.DataFrame:
-    df = try_read_worksheet_dataframe(settings, SHEET_META_DATA)
+    df = try_read_worksheet_dataframe(
+        settings,
+        SHEET_META_DATA,
+        required_headers=("Date",),
+    )
     if df is None or df.empty:
         return pd.DataFrame(columns=["Date", "Ad_Spend_USD"])
     out = df.copy()

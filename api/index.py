@@ -263,7 +263,7 @@ def _pipeline_after_import() -> dict[str, object]:
     try:
         from pipeline import main
 
-        code = main()
+        code = main("auto")
         out["pipeline_ran"] = True
         out["pipeline_exit_code"] = code
         out["pipeline_ok"] = code == 0
@@ -440,15 +440,24 @@ def api_app_jobs(request: Request) -> JSONResponse:
 
 
 @app.post("/api/app/run/{mode}", response_model=None)
-def api_app_run(request: Request, mode: str) -> JSONResponse:
+async def api_app_run(request: Request, mode: str) -> JSONResponse:
     _require_app_session_api(request)
     mode_norm = (mode or "").strip().lower()
-    if mode_norm not in {"full", "core", "tracking", "reporting"}:
+    if mode_norm not in {"auto", "full", "core", "tracking", "reporting"}:
         raise HTTPException(status_code=404, detail="Unknown pipeline mode")
+    body: dict[str, object] = {}
+    try:
+        parsed = await request.json()
+        if isinstance(parsed, dict):
+            body = parsed
+    except Exception:
+        body = {}
+    overrides = body.get("overrides")
+    run_overrides = overrides if isinstance(overrides, dict) else None
     try:
         from pipeline import main
 
-        code = main(mode_norm)
+        code = main(mode_norm, run_overrides=run_overrides)
         ok = code == 0
         msg = (
             f"Pipeline mód {mode_norm} sa úspešne aktualizoval."
@@ -556,7 +565,7 @@ def app_run_mode(request: Request, mode: str) -> Response:
     if redir:
         return redir
     mode_norm = (mode or "").strip().lower()
-    if mode_norm not in {"full", "core", "tracking", "reporting"}:
+    if mode_norm not in {"auto", "full", "core", "tracking", "reporting"}:
         raise HTTPException(status_code=404, detail="Unknown pipeline mode")
     return _run_pipeline_mode_html(mode_norm)
 
@@ -568,7 +577,7 @@ def run_pipeline(request: Request) -> JSONResponse:
     try:
         from pipeline import main
 
-        code = main()
+        code = main("auto")
         body: dict = {"ok": code == 0, "exitCode": code}
         return JSONResponse(status_code=200 if code == 0 else 500, content=body)
     except Exception as exc:

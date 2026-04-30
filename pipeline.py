@@ -165,6 +165,32 @@ def _fetch_meta_campaigns(settings: Settings) -> list[dict[str, Any]]:
     return _timed("meta_campaign_fetch", lambda: fetch_meta_campaign_insights(settings))
 
 
+def _fetch_meta_daily_safe(settings: Settings) -> list[dict[str, Any]]:
+    try:
+        return _fetch_meta_daily(settings)
+    except Exception as exc:
+        if not settings.meta_continue_on_error:
+            raise
+        logger.warning(
+            "Meta daily fetch failed, continuing with empty spend (META_CONTINUE_ON_ERROR=1): %s",
+            exc,
+        )
+        return []
+
+
+def _fetch_meta_campaigns_safe(settings: Settings) -> list[dict[str, Any]]:
+    try:
+        return _fetch_meta_campaigns(settings)
+    except Exception as exc:
+        if not settings.meta_continue_on_error:
+            raise
+        logger.warning(
+            "Meta campaign fetch failed, continuing with empty campaign data (META_CONTINUE_ON_ERROR=1): %s",
+            exc,
+        )
+        return []
+
+
 def _fetch_shopify_full(settings: Settings) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     logger.info("Fetching Shopify orders …")
     return _timed("shopify_fetch", lambda: fetch_orders_and_line_rows(settings))
@@ -184,7 +210,7 @@ def _fetch_shopify_incremental(
 
 def _normalize_mode(settings: Settings) -> str:
     mode = settings.pipeline_mode.strip().lower()
-    return mode if mode in {"full", "core", "tracking", "reporting"} else "full"
+    return mode if mode in {"auto", "full", "core", "tracking", "reporting"} else "auto"
 
 
 def _parse_iso_dt(value: str) -> datetime | None:
@@ -198,6 +224,29 @@ def _parse_iso_dt(value: str) -> datetime | None:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def _is_sync_stale(last_sync_iso: str, *, minutes: int) -> bool:
+    dt = _parse_iso_dt(last_sync_iso)
+    if dt is None:
+        return True
+    return (datetime.now(timezone.utc) - dt) >= timedelta(minutes=max(1, minutes))
+
+
+def _choose_auto_mode(state: PipelineState) -> str:
+    """
+    Autonomous rotation that avoids heavy full runs:
+    - core: frequent refresh (default fallback)
+    - tracking: less frequent shipment status refresh
+    - reporting: heavy bookkeeping/campaign refresh roughly daily
+    """
+    if _is_sync_stale(state.last_reporting_sync_at, minutes=24 * 60):
+        return "reporting"
+    if _is_sync_stale(state.last_tracking_sync_at, minutes=120):
+        return "tracking"
+    if _is_sync_stale(state.last_core_sync_at, minutes=30):
+        return "core"
+    return "core"
 
 
 def _updated_at_min_from_state(state: PipelineState, overlap_minutes: int) -> str | None:
@@ -437,7 +486,7 @@ def _build_artifacts(
 def _upload_core_tabs(settings: Settings, artifacts: PipelineArtifacts, *, started_total: float) -> None:
     def _run_step(step: str, fn, *, estimate: float = 0.0) -> None:
         _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
-        fn()
+        _timed(step, fn)
 
     log_missing_supplier_costs(
         artifacts.orders_df,
@@ -479,7 +528,7 @@ def _upload_core_tabs(settings: Settings, artifacts: PipelineArtifacts, *, start
 def _upload_tracking_tabs(settings: Settings, artifacts: PipelineArtifacts, *, started_total: float) -> None:
     def _run_step(step: str, fn, *, estimate: float = 0.0) -> None:
         _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
-        fn()
+        _timed(step, fn)
 
     _run_step(
         "sheet_orders_db",
@@ -503,7 +552,7 @@ def _upload_tracking_tabs(settings: Settings, artifacts: PipelineArtifacts, *, s
 def _upload_reporting_tabs(settings: Settings, artifacts: PipelineArtifacts, *, started_total: float) -> None:
     def _run_step(step: str, fn, *, estimate: float = 0.0) -> None:
         _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
-        fn()
+        _timed(step, fn)
 
     _run_step(
         "sheet_meta_data",
@@ -533,7 +582,7 @@ def _upload_reporting_tabs(settings: Settings, artifacts: PipelineArtifacts, *, 
 def _upload_full_tabs(settings: Settings, artifacts: PipelineArtifacts, *, started_total: float) -> None:
     def _run_step(step: str, fn, *, estimate: float = 0.0) -> None:
         _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
-        fn()
+        _timed(step, fn)
 
     _upload_core_tabs(settings, artifacts, started_total=started_total)
     pause_between_sheet_uploads()
@@ -606,9 +655,9 @@ def _run_full(settings: Settings, cost_maps) -> PipelineArtifacts:
     max_workers = 3 if settings.meta_campaign_insights else 2
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         shopify_future = executor.submit(_fetch_shopify_full, settings)
-        meta_future = executor.submit(_fetch_meta_daily, settings)
+        meta_future = executor.submit(_fetch_meta_daily_safe, settings)
         meta_campaign_future = (
-            executor.submit(_fetch_meta_campaigns, settings) if settings.meta_campaign_insights else None
+            executor.submit(_fetch_meta_campaigns_safe, settings) if settings.meta_campaign_insights else None
         )
         shopify_orders, line_rows = shopify_future.result()
         meta_rows = meta_future.result()
@@ -633,7 +682,7 @@ def _run_core(settings: Settings, cost_maps, state: PipelineState) -> PipelineAr
     updated_at_min = _updated_at_min_from_state(state, settings.pipeline_overlap_minutes)
     with ThreadPoolExecutor(max_workers=2) as executor:
         shopify_future = executor.submit(_fetch_shopify_incremental, settings_core, updated_at_min=updated_at_min)
-        meta_future = executor.submit(_fetch_meta_daily, settings)
+        meta_future = executor.submit(_fetch_meta_daily_safe, settings)
         changed_orders, changed_rows = shopify_future.result()
         meta_rows = meta_future.result()
     merged_orders_df = _merge_orders_df(
@@ -673,7 +722,7 @@ def _run_tracking(settings: Settings, cost_maps, state: PipelineState) -> Pipeli
     log_shopify_auth_config(settings_tracking)
     with ThreadPoolExecutor(max_workers=2) as executor:
         orders_future = executor.submit(fetch_orders_by_ids, settings_tracking, candidate_ids)
-        meta_future = executor.submit(_fetch_meta_daily, settings)
+        meta_future = executor.submit(_fetch_meta_daily_safe, settings)
         raw_orders = orders_future.result()
         meta_rows = meta_future.result()
     refreshed_orders, refreshed_rows = fetch_orders_and_line_rows(settings_tracking, orders=raw_orders)
@@ -699,8 +748,8 @@ def _run_reporting(settings: Settings, cost_maps, state: PipelineState) -> Pipel
     settings_reporting = _settings_for_reporting_mode(settings)
     with ThreadPoolExecutor(max_workers=3) as executor:
         shopify_future = executor.submit(_timed, "shopify_fetch", lambda: fetch_all_orders(settings_reporting))
-        meta_future = executor.submit(_fetch_meta_daily, settings)
-        meta_campaign_future = executor.submit(_fetch_meta_campaigns, settings)
+        meta_future = executor.submit(_fetch_meta_daily_safe, settings)
+        meta_campaign_future = executor.submit(_fetch_meta_campaigns_safe, settings)
         shopify_orders = shopify_future.result()
         meta_rows = meta_future.result()
         meta_campaign_rows = meta_campaign_future.result()
@@ -770,9 +819,38 @@ def _run_parity_check(settings: Settings, cost_maps, state: PipelineState, mode:
     logger.info("Parity check passed for mode=%s", mode)
 
 
-def main(mode_override: str | None = None) -> int:
+_RUN_OVERRIDE_BOOL_FIELDS = {
+    "meta_campaign_insights",
+    "meta_continue_on_error",
+    "sheets_fancy_layout",
+    "sheets_conditional_format",
+    "shopify_fulfillment_enrich",
+    "shopify_fulfillment_refetch_early",
+    "shopify_graphql_fulfillment_verify",
+}
+
+
+def _apply_run_overrides(settings: Settings, overrides: dict[str, Any] | None) -> Settings:
+    if not overrides:
+        return settings
+    changes: dict[str, Any] = {}
+    for key in _RUN_OVERRIDE_BOOL_FIELDS:
+        if key in overrides and isinstance(overrides[key], bool):
+            changes[key] = overrides[key]
+    if overrides.get("track17_enabled") is False:
+        changes["track17_api_key"] = None
+    if not changes:
+        return settings
+    logger.info(
+        "pipeline_run_overrides=%s",
+        ",".join(f"{key}={value}" for key, value in sorted(changes.items())),
+    )
+    return dc_replace(settings, **changes)
+
+
+def main(mode_override: str | None = None, run_overrides: dict[str, Any] | None = None) -> int:
     try:
-        settings = load_settings()
+        settings = _apply_run_overrides(load_settings(), run_overrides)
     except RuntimeError as exc:
         logger.error("%s", exc)
         return 1
@@ -780,8 +858,11 @@ def main(mode_override: str | None = None) -> int:
     started_total = time.perf_counter()
     state = load_pipeline_state(settings)
     mode = (mode_override or _normalize_mode(settings)).strip().lower()
-    if mode not in {"full", "core", "tracking", "reporting"}:
-        mode = "full"
+    if mode not in {"auto", "full", "core", "tracking", "reporting"}:
+        mode = "auto"
+    if mode == "auto":
+        mode = _choose_auto_mode(state)
+        logger.info("pipeline_auto_selected_mode=%s", mode)
     phase = "supplier_costs"
 
     try:
@@ -797,18 +878,30 @@ def main(mode_override: str | None = None) -> int:
             len(cost_maps.learned_by_product_sku),
         )
 
-        if mode == "full" or not settings.pipeline_enable_incremental:
+        if mode == "full":
             phase = "full"
             artifacts = _run_full(settings, cost_maps)
             phase = "sheets"
             logger.info("Uploading to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
             _timed("sheets", lambda: _upload_full_tabs(settings, artifacts, started_total=started_total))
         elif mode == "core":
-            phase = "core"
-            artifacts = _run_core(settings, cost_maps, state)
-            phase = "sheets_core"
-            logger.info("Uploading core tabs to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
-            _timed("sheets", lambda: _upload_core_tabs(settings, artifacts, started_total=started_total))
+            if not settings.pipeline_enable_incremental:
+                logger.info("Core mode requested but PIPELINE_ENABLE_INCREMENTAL=0 -> fallback to full mode")
+                phase = "full"
+                artifacts = _run_full(settings, cost_maps)
+                phase = "sheets"
+                logger.info(
+                    "Uploading to Google Sheets %r …",
+                    settings.google_sheet_id or settings.google_sheet_name,
+                )
+                _timed("sheets", lambda: _upload_full_tabs(settings, artifacts, started_total=started_total))
+                mode = "full"
+            else:
+                phase = "core"
+                artifacts = _run_core(settings, cost_maps, state)
+                phase = "sheets_core"
+                logger.info("Uploading core tabs to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
+                _timed("sheets", lambda: _upload_core_tabs(settings, artifacts, started_total=started_total))
         elif mode == "tracking":
             phase = "tracking"
             artifacts = _run_tracking(settings, cost_maps, state)

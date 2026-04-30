@@ -45,6 +45,7 @@ class Settings:
     meta_time_range_since: str | None
     meta_time_range_until: str | None
     meta_campaign_insights: bool
+    meta_continue_on_error: bool
     google_sheet_id: str | None
     google_sheet_name: str | None
     google_creds_path: Path | None
@@ -297,6 +298,7 @@ def load_settings() -> Settings:
         meta_time_range_since=os.getenv("META_TIME_RANGE_SINCE", "").strip() or None,
         meta_time_range_until=os.getenv("META_TIME_RANGE_UNTIL", "").strip() or None,
         meta_campaign_insights=_env_bool("META_CAMPAIGN_INSIGHTS", True),
+        meta_continue_on_error=_env_bool("META_CONTINUE_ON_ERROR", True),
         google_sheet_id=google_sheet_id,
         google_sheet_name=google_sheet_name,
         google_creds_path=google_creds_path,
@@ -335,8 +337,8 @@ def load_settings() -> Settings:
         track17_api_key=track17_api_key,
         # 0 = no cap (query all distinct tracking numbers in the run). Set a positive limit to protect API quota.
         track17_max_trackings_per_run=_optional_int("TRACK17_MAX_TRACKINGS_PER_RUN", 0),
-        pipeline_mode=(os.getenv("PIPELINE_MODE", "full").strip().lower() or "full"),
-        pipeline_enable_incremental=_env_bool("PIPELINE_ENABLE_INCREMENTAL", False),
+        pipeline_mode=(os.getenv("PIPELINE_MODE", "auto").strip().lower() or "auto"),
+        pipeline_enable_incremental=_env_bool("PIPELINE_ENABLE_INCREMENTAL", True),
         pipeline_enable_parity_check=_env_bool("PIPELINE_ENABLE_PARITY_CHECK", False),
         pipeline_state_tab=(os.getenv("PIPELINE_STATE_TAB", "PIPELINE_STATE").strip() or "PIPELINE_STATE"),
         pipeline_overlap_minutes=max(0, _optional_int("PIPELINE_OVERLAP_MINUTES", 10)),

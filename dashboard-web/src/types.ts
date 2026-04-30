@@ -40,3 +40,14 @@ export type PipelineRunResult = {
   message?: string;
   error?: string;
 };
+
+export type PipelineRunOverrides = {
+  meta_campaign_insights: boolean;
+  meta_continue_on_error: boolean;
+  sheets_fancy_layout: boolean;
+  sheets_conditional_format: boolean;
+  shopify_fulfillment_enrich: boolean;
+  shopify_fulfillment_refetch_early: boolean;
+  shopify_graphql_fulfillment_verify: boolean;
+  track17_enabled: boolean;
+};

@@ -73,7 +73,8 @@ export function JobsHome() {
   }
 
   const jobRows: [string, string, string, "primary" | "secondary" | "ghost"][] = [
-    ["auto", "Vyberie core / tracking / reporting podľa PIPELINE_STATE", "Spustiť", "primary"],
+    ["auto", "Vyberie business / tracking / reporting podľa PIPELINE_STATE", "Spustiť", "primary"],
+    ["business", "Shopify + Meta + payouts + refunds + BOOKKEEPING", "Spustiť", "primary"],
     ["core", "Shopify + supplier costs + daily Meta + hlavné taby", "Spustiť", "primary"],
     ["tracking", "17TRACK + delivery refresh len pre aktívne zásielky", "Spustiť", "secondary"],
     ["reporting", "META_CAMPAIGNS a BOOKKEEPING", "Spustiť", "secondary"],

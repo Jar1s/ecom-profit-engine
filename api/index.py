@@ -453,7 +453,7 @@ def api_app_jobs(request: Request) -> JSONResponse:
 async def api_app_run(request: Request, mode: str) -> JSONResponse:
     _require_app_session_api(request)
     mode_norm = (mode or "").strip().lower()
-    if mode_norm not in {"auto", "full", "core", "tracking", "reporting"}:
+    if mode_norm not in {"auto", "full", "business", "core", "tracking", "reporting"}:
         raise HTTPException(status_code=404, detail="Unknown pipeline mode")
     body: dict[str, object] = {}
     try:
@@ -576,7 +576,7 @@ def app_run_mode(request: Request, mode: str) -> Response:
     if redir:
         return redir
     mode_norm = (mode or "").strip().lower()
-    if mode_norm not in {"auto", "full", "core", "tracking", "reporting"}:
+    if mode_norm not in {"auto", "full", "business", "core", "tracking", "reporting"}:
         raise HTTPException(status_code=404, detail="Unknown pipeline mode")
     return _run_pipeline_mode_html(mode_norm)
 
@@ -641,6 +641,20 @@ def run_pipeline_reporting(request: Request) -> JSONResponse:
         logger.exception("Pipeline reporting failed")
         logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "reporting"})
+
+
+@app.api_route("/cron/business", methods=["GET", "POST"])
+def run_pipeline_business(request: Request) -> JSONResponse:
+    _check_auth(request)
+    try:
+        from pipeline import main
+
+        code = main("business")
+        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "business"})
+    except Exception as exc:
+        logger.exception("Pipeline business failed")
+        logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "business"})
 
 
 @app.get("/debug/shopify-env")

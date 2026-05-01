@@ -260,6 +260,7 @@ def page_dashboard(*, status: dict[str, Any], cards: list[dict[str, str]], runs:
           <div class="panel-head"><div><h2>Job Control</h2><p>Spúšťanie pipeline módov priamo z aplikácie.</p></div></div>
           <div class="panel-body stack">
             <div class="inline-forms">
+              <form method="post" action="/app/run/business"><button class="btn" type="submit">Run Business</button></form>
               <form method="post" action="/app/run/core"><button class="btn" type="submit">Run Core</button></form>
               <form method="post" action="/app/run/tracking"><button class="btn secondary" type="submit">Run Tracking</button></form>
               <form method="post" action="/app/run/reporting"><button class="btn secondary" type="submit">Run Reporting</button></form>
@@ -349,6 +350,7 @@ def page_jobs(runs: list[dict[str, str]]) -> str:
     <div class="grid two">
       <section class="panel"><div class="panel-head"><div><h2>Run Jobs</h2><p>Manuálne spúšťanie pipeline režimov priamo z UI.</p></div></div>
         <div class="panel-body stack">
+          <div class="list-item"><div><strong>Business</strong><small>Shopify + Meta + payouts + refunds + BOOKKEEPING</small></div><div><form method="post" action="/app/run/business"><button class="btn" type="submit">Spustiť</button></form></div></div>
           <div class="list-item"><div><strong>Core</strong><small>Shopify + supplier costs + daily Meta + hlavné taby</small></div><div><form method="post" action="/app/run/core"><button class="btn" type="submit">Spustiť</button></form></div></div>
           <div class="list-item"><div><strong>Tracking</strong><small>17TRACK + delivery refresh len pre aktívne zásielky</small></div><div><form method="post" action="/app/run/tracking"><button class="btn secondary" type="submit">Spustiť</button></form></div></div>
           <div class="list-item"><div><strong>Reporting</strong><small>META_CAMPAIGNS a BOOKKEEPING</small></div><div><form method="post" action="/app/run/reporting"><button class="btn secondary" type="submit">Spustiť</button></form></div></div>

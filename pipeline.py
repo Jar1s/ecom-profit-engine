@@ -171,7 +171,7 @@ def _check_runtime_budget(
         raise RuntimeError(
             "runtime budget reached before step="
             f"{step} (elapsed={elapsed:.1f}s, budget={budget:.1f}s, remaining={remaining:.1f}s). "
-            "Use PIPELINE_MODE=core/tracking/reporting, disable heavy sheets formatting "
+            "Use PIPELINE_MODE=business/core/tracking/reporting, disable heavy sheets formatting "
             "(SHEETS_FANCY_LAYOUT=0, SHEETS_CONDITIONAL_FORMAT=0), or increase function timeout."
         )
 
@@ -231,7 +231,7 @@ def _fetch_shopify_incremental(
 
 def _normalize_mode(settings: Settings) -> str:
     mode = settings.pipeline_mode.strip().lower()
-    return mode if mode in {"auto", "full", "core", "tracking", "reporting"} else "auto"
+    return mode if mode in {"auto", "full", "business", "core", "tracking", "reporting"} else "auto"
 
 
 def _parse_iso_dt(value: str) -> datetime | None:
@@ -257,17 +257,17 @@ def _is_sync_stale(last_sync_iso: str, *, minutes: int) -> bool:
 def _choose_auto_mode(state: PipelineState) -> str:
     """
     Autonomous rotation that avoids heavy full runs:
-    - core: frequent refresh (default fallback)
+    - business: frequent end-to-end business snapshot
     - tracking: less frequent shipment status refresh
-    - reporting: heavy bookkeeping/campaign refresh roughly daily
+    - reporting: extra campaign/finance refresh roughly daily
     """
     if _is_sync_stale(state.last_reporting_sync_at, minutes=24 * 60):
         return "reporting"
     if _is_sync_stale(state.last_tracking_sync_at, minutes=120):
         return "tracking"
     if _is_sync_stale(state.last_core_sync_at, minutes=30):
-        return "core"
-    return "core"
+        return "business"
+    return "business"
 
 
 def _updated_at_min_from_state(state: PipelineState, overlap_minutes: int) -> str | None:
@@ -493,6 +493,14 @@ def _settings_for_reporting_mode(settings: Settings) -> Settings:
         track17_api_key=None,
         shopify_fulfillment_enrich=False,
         shopify_graphql_fulfillment_verify=False,
+    )
+
+
+def _settings_for_business_mode(settings: Settings) -> Settings:
+    return dc_replace(
+        settings,
+        # Business snapshot should include payouts/bookkeeping but avoid tracking-only overhead.
+        track17_api_key=None,
     )
 
 
@@ -735,6 +743,77 @@ def _upload_full_tabs(settings: Settings, artifacts: PipelineArtifacts, *, start
     )
 
 
+def _upload_business_tabs(settings: Settings, artifacts: PipelineArtifacts, *, started_total: float) -> None:
+    def _run_step(step: str, fn, *, estimate: float = 0.0) -> None:
+        _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
+        _timed(step, fn)
+
+    log_missing_supplier_costs(
+        artifacts.orders_df,
+        artifacts.missing_cost_df,
+        sheet_tab=settings.missing_supplier_costs_tab,
+    )
+    if settings.missing_supplier_costs_tab:
+        _run_step(
+            "sheet_missing_supplier_costs",
+            lambda: replace_worksheet_simple(settings, settings.missing_supplier_costs_tab, artifacts.missing_cost_df),
+            estimate=3.0,
+        )
+        pause_between_sheet_uploads()
+    _run_step(
+        "sheet_orders_db",
+        lambda: upload_dataframe(settings, artifacts.orders_df, SHEET_ORDERS_DB, layout_kind="orders"),
+        estimate=20.0,
+    )
+    pause_between_sheet_uploads()
+    _run_step(
+        "sheet_order_level",
+        lambda: upload_dataframe(settings, artifacts.order_df, SHEET_ORDER_LEVEL, layout_kind="order_level"),
+        estimate=20.0,
+    )
+    pause_between_sheet_uploads()
+    _run_step(
+        "sheet_meta_data",
+        lambda: upload_dataframe(settings, artifacts.meta_df, SHEET_META_DATA, layout_kind="meta"),
+        estimate=10.0,
+    )
+    pause_between_sheet_uploads()
+    _run_step(
+        "sheet_daily_summary",
+        lambda: upload_dataframe(settings, artifacts.daily_final, SHEET_DAILY, layout_kind="daily"),
+        estimate=10.0,
+    )
+    pause_between_sheet_uploads()
+    if not artifacts.meta_campaign_df.empty or settings.meta_campaign_insights:
+        _run_step(
+            "sheet_meta_campaigns",
+            lambda: upload_dataframe(
+                settings,
+                artifacts.meta_campaign_df,
+                SHEET_META_CAMPAIGNS,
+                layout_kind="meta_campaigns",
+            ),
+            estimate=10.0,
+        )
+        pause_between_sheet_uploads()
+    _run_step(
+        "sheet_payouts_fees",
+        lambda: upload_dataframe(
+            settings,
+            artifacts.payouts_fees_df,
+            SHEET_PAYOUTS_FEES,
+            layout_kind="payouts",
+        ),
+        estimate=10.0,
+    )
+    pause_between_sheet_uploads()
+    _run_step(
+        "sheet_bookkeeping",
+        lambda: upload_dataframe(settings, artifacts.bookkeeping_df, SHEET_BOOKKEEPING, layout_kind="bookkeeping"),
+        estimate=10.0,
+    )
+
+
 def _update_state_after_success(
     settings: Settings,
     state: PipelineState,
@@ -754,6 +833,12 @@ def _update_state_after_success(
     )
     if mode == "core":
         next_state = dc_replace(next_state, last_core_sync_at=now)
+    elif mode == "business":
+        next_state = dc_replace(
+            next_state,
+            last_core_sync_at=now,
+            last_reporting_sync_at=now,
+        )
     elif mode == "tracking":
         next_state = dc_replace(next_state, last_tracking_sync_at=now)
     elif mode == "reporting":
@@ -907,6 +992,54 @@ def _run_reporting(settings: Settings, cost_maps, state: PipelineState) -> Pipel
     )
 
 
+def _run_business(settings: Settings, cost_maps, state: PipelineState) -> PipelineArtifacts:
+    existing_orders_df = _load_orders_db_df(settings)
+    settings_business = _settings_for_business_mode(settings)
+    log_shopify_auth_config(settings_business)
+    updated_at_min = _updated_at_min_from_state(state, settings.pipeline_overlap_minutes)
+    can_incremental = (not existing_orders_df.empty) and bool(state.shopify_orders_updated_at_max)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        if can_incremental:
+            shopify_future = executor.submit(
+                _fetch_shopify_incremental,
+                settings_business,
+                updated_at_min=updated_at_min,
+            )
+        else:
+            logger.info("Business mode bootstrap fallback -> full Shopify fetch")
+            shopify_future = executor.submit(_fetch_shopify_full, settings_business)
+        meta_future = executor.submit(_fetch_meta_daily_safe, settings)
+        meta_campaign_future = (
+            executor.submit(_fetch_meta_campaigns_safe, settings)
+            if settings.meta_campaign_insights
+            else None
+        )
+        payouts_future = executor.submit(payout_fee_rows, settings_business)
+        shopify_orders, line_rows = shopify_future.result()
+        meta_rows = meta_future.result()
+        meta_campaign_rows = meta_campaign_future.result() if meta_campaign_future else None
+        payout_rows = payouts_future.result()
+
+    meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
+    if can_incremental:
+        changed_rows = line_rows
+        merged_orders_df = _merge_orders_df(
+            existing_orders_df,
+            enrich_usd_columns(enrich_line_items(changed_rows, cost_maps), settings.usd_per_local),
+        )
+        line_rows = merged_orders_df.to_dict(orient="records")
+    return _build_artifacts(
+        settings,
+        cost_maps,
+        line_rows=line_rows,
+        shopify_orders=shopify_orders,
+        meta_rows=meta_rows,
+        meta_campaign_rows=meta_campaign_rows,
+        payouts_fee_rows=payout_rows,
+    )
+
+
 def _log_completion(artifacts: PipelineArtifacts, started_total: float) -> None:
     logger.info(
         "Done. Line rows=%s, order rows=%s, meta days=%s, campaign rows=%s, payouts rows=%s, daily rows=%s, bookkeeping months=%s",
@@ -952,6 +1085,13 @@ def _run_parity_check(settings: Settings, cost_maps, state: PipelineState, mode:
         baseline = _run_reporting(settings, cost_maps, state)
         _ensure_frame_equal("META_DATA", actual.meta_df, baseline.meta_df, ["Date"])
         _ensure_frame_equal("META_CAMPAIGNS", actual.meta_campaign_df, baseline.meta_campaign_df, ["Date", "Campaign_ID"])
+        _ensure_frame_equal("BOOKKEEPING", actual.bookkeeping_df, baseline.bookkeeping_df, ["Month"])
+    elif mode == "business":
+        baseline = _run_business(settings, cost_maps, state)
+        _ensure_frame_equal("ORDERS_DB", actual.orders_df, baseline.orders_df, ["Line_Item_ID"])
+        _ensure_frame_equal("ORDER_LEVEL", actual.order_df, baseline.order_df, ["Order_ID"])
+        _ensure_frame_equal("DAILY_SUMMARY", actual.daily_final, baseline.daily_final, ["Date"])
+        _ensure_frame_equal("META_DATA", actual.meta_df, baseline.meta_df, ["Date"])
         _ensure_frame_equal("BOOKKEEPING", actual.bookkeeping_df, baseline.bookkeeping_df, ["Month"])
     else:
         baseline = _run_full(settings, cost_maps)
@@ -1003,7 +1143,7 @@ def main(mode_override: str | None = None, run_overrides: dict[str, Any] | None 
     started_total = time.perf_counter()
     state = load_pipeline_state(settings)
     mode = (mode_override or _normalize_mode(settings)).strip().lower()
-    if mode not in {"auto", "full", "core", "tracking", "reporting"}:
+    if mode not in {"auto", "full", "business", "core", "tracking", "reporting"}:
         mode = "auto"
     if mode == "auto":
         mode = _choose_auto_mode(state)
@@ -1029,6 +1169,12 @@ def main(mode_override: str | None = None, run_overrides: dict[str, Any] | None 
             phase = "sheets"
             logger.info("Uploading to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
             _timed("sheets", lambda: _upload_full_tabs(settings, artifacts, started_total=started_total))
+        elif mode == "business":
+            phase = "business"
+            artifacts = _run_business(settings, cost_maps, state)
+            phase = "sheets_business"
+            logger.info("Uploading business tabs to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
+            _timed("sheets", lambda: _upload_business_tabs(settings, artifacts, started_total=started_total))
         elif mode == "core":
             if not settings.pipeline_enable_incremental:
                 logger.info("Core mode requested but PIPELINE_ENABLE_INCREMENTAL=0 -> fallback to full mode")

@@ -409,6 +409,7 @@ export function DashboardHome() {
               <div className="flex flex-wrap gap-3">
                 {(
                   [
+                    ["business", "primary", "Run Business"],
                     ["core", "primary", "Run Core"],
                     ["tracking", "secondary", "Run Tracking"],
                     ["reporting", "secondary", "Run Reporting"],

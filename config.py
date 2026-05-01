@@ -73,6 +73,7 @@ class Settings:
     shopify_graphql_verify_max: int  # Max GraphQL order lookups per run; 0 = no cap
     track17_api_key: str | None  # 17TRACK API — carrier status beyond Shopify (optional); None if disabled
     track17_max_trackings_per_run: int  # Max distinct tracking numbers per pipeline run (0 = no cap)
+    carrier_tracking_source: str  # shopify | 17track — Shopify-only vs optional paid 17TRACK enrichment
     pipeline_mode: str  # full | core | tracking | reporting
     pipeline_enable_incremental: bool
     pipeline_enable_parity_check: bool
@@ -132,6 +133,18 @@ def _item_catalog_sheet_tab() -> str | None:
 def _missing_supplier_costs_tab() -> str | None:
     s = os.getenv("MISSING_SUPPLIER_COSTS_TAB", "MISSING_SUPPLIER_COSTS").strip()
     return s if s else None
+
+
+def normalize_carrier_tracking_source(raw: str | None) -> str:
+    """
+    CARRIER_TRACKING_SOURCE env:
+      shopify | shopify_only → only Shopify fulfillment/shipment fields (no 17TRACK HTTP calls).
+      17track | unset → use 17TRACK when TRACK17_API_KEY is set and TRACK17_ENABLED=1.
+    """
+    s = (raw or "").strip().lower()
+    if s in ("shopify", "shopify_only"):
+        return "shopify"
+    return "17track"
 
 
 def _sheets_roas_warn_below() -> float | None:
@@ -277,9 +290,12 @@ def load_settings() -> Settings:
             "GOOGLE_SHEET_ID or GOOGLE_SHEET_URL (open by id; only Sheets API required)."
         )
 
+    carrier_tracking_source = normalize_carrier_tracking_source(os.getenv("CARRIER_TRACKING_SOURCE"))
     track17_enabled = _env_bool("TRACK17_ENABLED", True)
     track17_api_key = os.getenv("TRACK17_API_KEY", "").strip() or None
-    if not track17_enabled:
+    if carrier_tracking_source == "shopify":
+        track17_api_key = None
+    elif not track17_enabled:
         track17_api_key = None
 
     return Settings(
@@ -337,6 +353,7 @@ def load_settings() -> Settings:
         track17_api_key=track17_api_key,
         # 0 = no cap (query all distinct tracking numbers in the run). Set a positive limit to protect API quota.
         track17_max_trackings_per_run=_optional_int("TRACK17_MAX_TRACKINGS_PER_RUN", 0),
+        carrier_tracking_source=carrier_tracking_source,
         pipeline_mode=(os.getenv("PIPELINE_MODE", "auto").strip().lower() or "auto"),
         pipeline_enable_incremental=_env_bool("PIPELINE_ENABLE_INCREMENTAL", True),
         pipeline_enable_parity_check=_env_bool("PIPELINE_ENABLE_PARITY_CHECK", False),

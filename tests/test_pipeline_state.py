@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from pipeline import (
+    _daily_meta_rows_prefer_campaign_sum,
     _load_meta_df,
     _load_orders_db_df,
     _merge_meta_rows_with_existing,
@@ -132,3 +133,19 @@ class PipelineSheetLoadTests(TestCase):
         self.assertEqual(rows[0]["Ad_Spend"], 65.0)
         merged = meta_rows_for_daily_merge(rows, meta_spend_in_usd=True, usd_per_local=0.65)
         self.assertEqual(merged[0]["Ad_Spend"], 100.0)
+
+    def test_daily_meta_prefer_campaign_sum(self) -> None:
+        account = [
+            {"Date": "2026-01-01", "Ad_Spend": 100.0},
+            {"Date": "2025-12-01", "Ad_Spend": 50.0},
+        ]
+        camp = pd.DataFrame(
+            [
+                {"Date": "2026-01-01", "Ad_Spend": 30.0},
+                {"Date": "2026-01-01", "Ad_Spend": 40.0},
+            ]
+        )
+        out = _daily_meta_rows_prefer_campaign_sum(account, camp)
+        by_d = {r["Date"]: r["Ad_Spend"] for r in out}
+        self.assertEqual(by_d["2026-01-01"], 70.0)
+        self.assertEqual(by_d["2025-12-01"], 50.0)

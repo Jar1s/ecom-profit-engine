@@ -523,6 +523,46 @@ def _settings_for_business_mode(settings: Settings) -> Settings:
     )
 
 
+def _daily_meta_rows_prefer_campaign_sum(
+    meta_rows_account: list[dict[str, Any]],
+    meta_campaign_df: pd.DataFrame,
+) -> list[dict[str, Any]]:
+    """
+    Per-day Ad_Spend for merge_daily_with_meta. When campaign×day insights exist, each day uses
+    sum(Ad_Spend) across campaigns — identical roll-up to the META_CAMPAIGNS sheet. Account-level
+    META_DATA can disagree with Meta Ads Manager; aggregating campaigns matches what merchants verify.
+
+    Dates only present in the account-level series (older history outside campaign fetch) keep
+    account spend.
+    """
+    if meta_campaign_df.empty:
+        return meta_rows_account
+    if "Date" not in meta_campaign_df.columns or "Ad_Spend" not in meta_campaign_df.columns:
+        return meta_rows_account
+    cdf = meta_campaign_df.copy()
+    cdf["Date"] = cdf["Date"].astype(str).str.strip()
+    cdf["Ad_Spend"] = pd.to_numeric(cdf["Ad_Spend"], errors="coerce").fillna(0.0)
+    campaign_daily = cdf.groupby("Date", as_index=False)["Ad_Spend"].sum()
+    by_campaign_day = {
+        str(row["Date"]).strip(): float(row["Ad_Spend"])
+        for _, row in campaign_daily.iterrows()
+    }
+    by_account_day = {
+        str(r.get("Date", "")).strip(): float(r.get("Ad_Spend") or 0)
+        for r in meta_rows_account
+        if str(r.get("Date", "")).strip()
+    }
+    all_dates = sorted(set(by_campaign_day) | set(by_account_day))
+    out: list[dict[str, Any]] = []
+    for d in all_dates:
+        if d in by_campaign_day:
+            spend = round(by_campaign_day[d], 2)
+        else:
+            spend = round(by_account_day.get(d, 0.0), 2)
+        out.append({"Date": d, "Ad_Spend": spend})
+    return out
+
+
 def _build_meta_df(meta_rows: list[dict[str, Any]], settings: Settings) -> pd.DataFrame:
     meta_df_all = enrich_meta_usd_columns(
         pd.DataFrame(meta_rows),
@@ -571,8 +611,17 @@ def _build_artifacts(
             "daily merge may mix Meta USD with Shopify shop currency for ROAS."
         )
     logger.info("Merging daily summary with Meta spend …")
+    meta_for_daily = meta_rows
+    if settings.daily_meta_from_campaign_sum and not meta_campaign_df.empty:
+        meta_for_daily = _daily_meta_rows_prefer_campaign_sum(meta_rows, meta_campaign_df)
+        logger.info(
+            "Daily Meta merge uses campaign×day sums (%s days) — aligns Ad_Spend with META_CAMPAIGNS roll-ups",
+            meta_campaign_df["Date"].astype(str).str.strip().nunique()
+            if "Date" in meta_campaign_df.columns
+            else 0,
+        )
     meta_for_merge = meta_rows_for_daily_merge(
-        meta_rows,
+        meta_for_daily,
         meta_spend_in_usd=settings.meta_spend_in_usd,
         usd_per_local=settings.usd_per_local,
     )

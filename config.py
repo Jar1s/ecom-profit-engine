@@ -46,6 +46,7 @@ class Settings:
     meta_time_range_until: str | None
     meta_campaign_insights: bool
     meta_continue_on_error: bool
+    daily_meta_from_campaign_sum: bool  # DAILY_SUMMARY Ad_Spend from sum(META_CAMPAIGNS) per day vs account insights
     google_sheet_id: str | None
     google_sheet_name: str | None
     google_creds_path: Path | None
@@ -315,6 +316,7 @@ def load_settings() -> Settings:
         meta_time_range_until=os.getenv("META_TIME_RANGE_UNTIL", "").strip() or None,
         meta_campaign_insights=_env_bool("META_CAMPAIGN_INSIGHTS", True),
         meta_continue_on_error=_env_bool("META_CONTINUE_ON_ERROR", True),
+        daily_meta_from_campaign_sum=_env_bool("DAILY_META_FROM_CAMPAIGN_SUM", True),
         google_sheet_id=google_sheet_id,
         google_sheet_name=google_sheet_name,
         google_creds_path=google_creds_path,

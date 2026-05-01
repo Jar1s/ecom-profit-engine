@@ -47,6 +47,7 @@ def _nav(active: str | None = None) -> str:
         ("Daily", "/app/daily", "daily"),
         ("Marketing", "/app/marketing", "marketing"),
         ("Accounting", "/app/accounting", "accounting"),
+        ("Payouts", "/app/payouts", "payouts"),
         ("Costs", "/app/costs", "costs"),
         ("Jobs", "/app/jobs", "jobs"),
     ]
@@ -312,6 +313,11 @@ def page_marketing(meta_table: Any, campaign_table: Any) -> str:
 def page_accounting(table: Any) -> str:
     body = f'''<section class="panel"><div class="panel-head"><div><h2>BOOKKEEPING</h2><p>Manažérsky mesačný P&L z pipeline bez ručného čítania sheet tabu.</p></div></div><div class="panel-body">{_table(table, empty='BOOKKEEPING zatiaľ bez dát.')}</div></section>'''
     return _shell(title="Accounting", subtitle="Mesačný management P&L pre operating review.", body=body, active="accounting")
+
+
+def page_payouts(table: Any) -> str:
+    body = f'''<section class="panel"><div class="panel-head"><div><h2>PAYOUTS_FEES</h2><p>Shopify payout transakcie a fee náklady pre net profit.</p></div></div><div class="panel-body">{_table(table, empty='PAYOUTS_FEES zatiaľ bez dát.')}</div></section>'''
+    return _shell(title="Payouts", subtitle="Detail payout fee transakcií započítaných do after-fees profitu.", body=body, active="payouts")
 
 
 def page_costs(missing_table: Any) -> str:

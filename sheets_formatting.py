@@ -417,6 +417,26 @@ def apply_data_conditional_formatting(
             }
         )
 
+    op_after_fees_i = _col_index(columns, "Operating_Income_After_Payout_Fees")
+    if op_after_fees_i is not None and layout_kind == "bookkeeping":
+        requests.append(
+            {
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [_grid(sheet_id, r0=d0, r1=d1, c0=op_after_fees_i, c1=op_after_fees_i + 1)],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "NUMBER_LESS",
+                                "values": [{"userEnteredValue": "0"}],
+                            },
+                            "format": {"backgroundColor": _NEG_PROFIT_BG},
+                        },
+                    },
+                    "index": len(requests),
+                }
+            }
+        )
+
     thr = settings.sheets_roas_warn_below
     roas_i = _col_index(columns, "Marketing_ROAS")
     if (

@@ -168,6 +168,64 @@ def _days_in_transit(
     return max(0, (today - ship_date).days)
 
 
+def _refunds_total(order: dict[str, Any]) -> float:
+    """Sum Shopify refund transaction amounts in shop currency (absolute)."""
+    total = 0.0
+    for ref in order.get("refunds") or []:
+        if not isinstance(ref, dict):
+            continue
+        for tx in ref.get("transactions") or []:
+            if not isinstance(tx, dict):
+                continue
+            try:
+                total += abs(float(tx.get("amount") or 0))
+            except (TypeError, ValueError):
+                continue
+    return round(total, 2)
+
+
+def _refund_bucket(ratio_pct: float | None) -> str:
+    if ratio_pct is None:
+        return "None"
+    if 99.0 <= ratio_pct <= 101.0:
+        return "Full"
+    if 49.0 <= ratio_pct <= 51.0:
+        return "Half"
+    return "Other"
+
+
+def order_refund_columns(order: dict[str, Any]) -> dict[str, Any]:
+    """
+    Refund metrics repeated on each line-item row so ORDER_LEVEL can aggregate by order.
+    Ratio base = subtotal + shipping (pre-refund, shop currency).
+    """
+    refunds_total = _refunds_total(order)
+    try:
+        subtotal = float(order.get("subtotal_price") or 0)
+    except (TypeError, ValueError):
+        subtotal = 0.0
+    shipping = 0.0
+    tsp = order.get("total_shipping_price_set")
+    if isinstance(tsp, dict):
+        sm = tsp.get("shop_money")
+        if isinstance(sm, dict):
+            try:
+                shipping = float(sm.get("amount") or 0)
+            except (TypeError, ValueError):
+                shipping = 0.0
+    refund_base = round(max(0.0, subtotal + shipping), 2)
+    ratio_pct: float | None = None
+    if refunds_total > 0 and refund_base > 0:
+        ratio_pct = round((refunds_total / refund_base) * 100.0, 2)
+    bucket = "None" if refunds_total <= 0 else _refund_bucket(ratio_pct)
+    return {
+        "Refunds_Total": round(refunds_total, 2),
+        "Refund_Base_Amount": refund_base,
+        "Refund_Ratio_pct": ratio_pct if ratio_pct is not None else "",
+        "Refund_Bucket": bucket,
+    }
+
+
 def _delivery_status_label(order: dict[str, Any], shipment_status: str) -> str:
     """
     Single rollup for reporting: Unfulfilled / Partial / Shipped / In transit / …
@@ -419,6 +477,7 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
         order_name = order.get("name") or ""
 
         ship_cols = order_shipping_columns(order)
+        refund_cols = order_refund_columns(order)
         tracking_cols = order_tracking_columns(order, ship_cols=ship_cols)
         for item in order.get("line_items") or []:
             line_id = item.get("id")
@@ -451,6 +510,7 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "SKU": sku,
                     "Quantity": qty,
                     "Revenue": revenue,
+                    **refund_cols,
                 }
             )
     return rows

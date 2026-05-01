@@ -15,6 +15,7 @@ from pipeline import (
     SHEET_DAILY,
     SHEET_META_CAMPAIGNS,
     SHEET_ORDER_LEVEL,
+    SHEET_PAYOUTS_FEES,
 )
 from pipeline_state import PipelineState, load_pipeline_state
 import logging
@@ -33,6 +34,7 @@ class DashboardBundle:
     daily_df: pd.DataFrame
     meta_campaigns_df: pd.DataFrame
     bookkeeping_df: pd.DataFrame
+    payouts_fees_df: pd.DataFrame
     missing_costs_df: pd.DataFrame
 
 
@@ -70,6 +72,7 @@ def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
         (SHEET_DAILY, ("Date",)),
         (SHEET_META_CAMPAIGNS, ("Date",)),
         (SHEET_BOOKKEEPING, ("Month",)),
+        (SHEET_PAYOUTS_FEES, ("Date",)),
         (missing_tab, None),
     ]
     max_workers = max(
@@ -85,7 +88,7 @@ def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
         f_state = ex.submit(_load_state_safe, settings)
         futures = [ex.submit(_load_one, s) for s in specs]
         state = f_state.result()
-        order_level_df, daily_df, meta_campaigns_df, bookkeeping_df, missing_costs_df = (
+        order_level_df, daily_df, meta_campaigns_df, bookkeeping_df, payouts_fees_df, missing_costs_df = (
             f.result() for f in futures
         )
 
@@ -96,6 +99,7 @@ def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
         daily_df=daily_df,
         meta_campaigns_df=meta_campaigns_df,
         bookkeeping_df=bookkeeping_df,
+        payouts_fees_df=payouts_fees_df,
         missing_costs_df=missing_costs_df,
     )
 
@@ -170,6 +174,7 @@ _EXEC_THRESH_DEFAULTS: dict[str, dict[str, Any]] = {
     "Undelivered 30d": {"mode": "lower_better", "green": 60.0, "amber": 120.0},
     "Avg Transit Days": {"mode": "lower_better", "green": 5.0, "amber": 8.0},
     "Profit After Ads": {"mode": "higher_better", "green": 0.0, "amber": -500.0},
+    "Profit After Fees": {"mode": "higher_better", "green": 0.0, "amber": -500.0},
 }
 
 
@@ -234,6 +239,8 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
     revenue_30 = _to_numeric(daily_recent.get("Revenue", pd.Series(dtype=float))).sum()
     gross_profit_30 = _to_numeric(daily_recent.get("Gross_Profit", pd.Series(dtype=float))).sum()
     ad_spend_30 = _to_numeric(daily_recent.get("Ad_Spend", pd.Series(dtype=float))).sum()
+    payouts_recent = _recent_window(bundle.payouts_fees_df, 30)
+    payout_fees_30 = _to_numeric(payouts_recent.get("Fee_Amount", pd.Series(dtype=float))).sum()
     orders_30 = _to_numeric(daily_recent.get("Orders_Total", pd.Series(dtype=float))).sum()
     delivered_30 = _to_numeric(daily_recent.get("Orders_Delivered", pd.Series(dtype=float))).sum()
     undelivered_now = 0.0
@@ -241,6 +248,7 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
         delivery = order_level_recent["Delivery_Status"].astype(str).str.strip().str.lower()
         undelivered_now = float((delivery != "delivered").sum())
     roas_30 = (revenue_30 / ad_spend_30) if ad_spend_30 > 0 else None
+    profit_after_fees_30 = gross_profit_30 - ad_spend_30 - payout_fees_30
     last_sync = _latest_timestamp(
         bundle.state.last_core_sync_at,
         bundle.state.last_tracking_sync_at,
@@ -251,9 +259,15 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
         {"label": "Revenue 30d", "value": _fmt_money(revenue_30), "meta": "z DAILY_SUMMARY"},
         {"label": "Gross Profit 30d", "value": _fmt_money(gross_profit_30), "meta": "po supplier cost"},
         {"label": "Ad Spend 30d", "value": _fmt_money(ad_spend_30), "meta": "Meta daily spend"},
+        {"label": "Payout Fees 30d", "value": _fmt_money(payout_fees_30), "meta": "Shopify payouts fees"},
         {"label": "ROAS 30d", "value": _fmt_ratio(roas_30), "meta": "Revenue / Ad Spend"},
         {"label": "Orders 30d", "value": _fmt_int(orders_30), "meta": f"Delivered {_fmt_int(delivered_30)}"},
         {"label": "Undelivered", "value": _fmt_int(undelivered_now), "meta": "aktívne order-level"},
+        {
+            "label": "Profit After Fees",
+            "value": _fmt_money(profit_after_fees_30),
+            "meta": "Gross Profit - Ads - Payout fees (30d)",
+        },
         {
             "label": "Last Sync",
             "value": _fmt_timestamp_short(last_sync),
@@ -298,8 +312,13 @@ def recent_orders_table(bundle: DashboardBundle, limit: int = 30) -> pd.DataFram
         "Order",
         "Order_ID",
         "Revenue",
+        "Refunds_Total",
+        "Refund_Ratio_pct",
+        "Refund_Bucket",
+        "Net_Revenue_After_Refunds",
         "Product_Cost",
         "Gross_Profit",
+        "Gross_Profit_After_Refunds",
         "Delivery_Status",
         "Shipment_Status",
         "Carrier_Tracking_Status",
@@ -356,6 +375,28 @@ def bookkeeping_table(bundle: DashboardBundle, limit: int = 24) -> pd.DataFrame:
     if "Month" in df.columns:
         df = df.sort_values("Month", ascending=False)
     return df.head(limit)
+
+
+def payouts_fees_table(bundle: DashboardBundle, limit: int = 120) -> pd.DataFrame:
+    df = bundle.payouts_fees_df.copy()
+    if df.empty:
+        return df
+    if "Date" in df.columns:
+        df = _coerce_date_col(df).sort_values("Date", ascending=False)
+        df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
+    preferred = [
+        "Date",
+        "Payout_ID",
+        "Payout_Status",
+        "Currency",
+        "Transaction_Type",
+        "Source_Type",
+        "Source_Order_ID",
+        "Gross_Amount",
+        "Fee_Amount",
+        "Net_Amount",
+    ]
+    return df[[c for c in preferred if c in df.columns]].head(limit)
 
 
 def missing_costs_table(bundle: DashboardBundle, limit: int = 50) -> pd.DataFrame:

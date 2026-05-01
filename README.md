@@ -25,7 +25,7 @@ See `.env.example`. Required: `SHOPIFY_STORE`, `META_TOKEN`, `AD_ACCOUNT_ID`, `G
 
 Meta date range: either `META_LOOKBACK_DAYS` (default 90, ending today) or both `META_TIME_RANGE_SINCE` and `META_TIME_RANGE_UNTIL` (`YYYY-MM-DD`).
 
-Optional worksheet names: `SHEET_TAB_ORDERS_DB`, `SHEET_TAB_ORDER_LEVEL`, `SHEET_TAB_META_DATA`, `SHEET_TAB_DAILY_SUMMARY` (defaults: `ORDERS_DB`, `ORDER_LEVEL`, `META_DATA`, `DAILY_SUMMARY`).
+Optional worksheet names: `SHEET_TAB_ORDERS_DB`, `SHEET_TAB_ORDER_LEVEL`, `SHEET_TAB_META_DATA`, `SHEET_TAB_DAILY_SUMMARY`, `SHEET_TAB_BOOKKEEPING`, `SHEET_TAB_PAYOUTS_FEES` (defaults: `ORDERS_DB`, `ORDER_LEVEL`, `META_DATA`, `DAILY_SUMMARY`, `BOOKKEEPING`, `PAYOUTS_FEES`).
 
 ## Run
 
@@ -98,5 +98,6 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 ## Limitations (MVP)
 
 - Line revenue is `price × quantity`; discounts are not allocated line-by-line.
-- Refunds: not modeled (future phase).
+- Refunds are modeled in `BOOKKEEPING` and `ORDER_LEVEL` (`Refunds_Total`, ratio bucket Full/Half/Other).
+- `PAYOUTS_FEES` tracks Shopify payout transaction fees and `BOOKKEEPING` includes `Payout_Fees_Total` plus `Operating_Income_After_Payout_Fees`.
 - Product name matching is normalized text only; use aliases in a future iteration if needed.

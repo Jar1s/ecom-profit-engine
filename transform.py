@@ -94,6 +94,10 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.Dat
                 "SKU",
                 "Quantity",
                 "Revenue",
+                "Refunds_Total",
+                "Refund_Base_Amount",
+                "Refund_Ratio_pct",
+                "Refund_Bucket",
                 "Product_Cost",
                 "Gross_Profit",
             ]
@@ -139,8 +143,14 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
                 "Shipped_Date",
                 "Days_In_Transit",
                 "Revenue",
+                "Refunds_Total",
+                "Refund_Base_Amount",
+                "Refund_Ratio_pct",
+                "Refund_Bucket",
+                "Net_Revenue_After_Refunds",
                 "Product_Cost",
                 "Gross_Profit",
+                "Gross_Profit_After_Refunds",
             ]
         )
     agg: dict[str, Any] = {
@@ -148,6 +158,14 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         "Product_Cost": ("Product_Cost", "sum"),
         "Gross_Profit": ("Gross_Profit", "sum"),
     }
+    if "Refunds_Total" in df.columns:
+        agg["Refunds_Total"] = ("Refunds_Total", "max")
+    if "Refund_Base_Amount" in df.columns:
+        agg["Refund_Base_Amount"] = ("Refund_Base_Amount", "max")
+    if "Refund_Ratio_pct" in df.columns:
+        agg["Refund_Ratio_pct"] = ("Refund_Ratio_pct", "max")
+    if "Refund_Bucket" in df.columns:
+        agg["Refund_Bucket"] = ("Refund_Bucket", "first")
     for col in (
         "Fulfillment_Status",
         "Shipment_Status",
@@ -157,10 +175,27 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         "Carrier_Tracking_Status",
         "Shipped_Date",
         "Days_In_Transit",
+        "Refund_Bucket",
     ):
         if col in df.columns:
             agg[col] = (col, "first")
     grouped = df.groupby(["Date", "Order", "Order_ID"], dropna=False).agg(**agg).reset_index()
+    refunds_num = pd.to_numeric(
+        grouped["Refunds_Total"] if "Refunds_Total" in grouped.columns else pd.Series(0.0, index=grouped.index),
+        errors="coerce",
+    ).fillna(0.0)
+    revenue_num = pd.to_numeric(grouped["Revenue"], errors="coerce").fillna(0.0)
+    cost_num = pd.to_numeric(grouped["Product_Cost"], errors="coerce").fillna(0.0)
+    grouped["Net_Revenue_After_Refunds"] = (revenue_num - refunds_num).round(2)
+    grouped["Gross_Profit_After_Refunds"] = (grouped["Net_Revenue_After_Refunds"] - cost_num).round(2)
+    if "Refund_Ratio_pct" in grouped.columns:
+        grouped["Refund_Ratio_pct"] = pd.to_numeric(grouped["Refund_Ratio_pct"], errors="coerce").round(2)
+    if "Refunds_Total" in grouped.columns:
+        grouped["Refunds_Total"] = refunds_num.round(2)
+    if "Refund_Base_Amount" in grouped.columns:
+        grouped["Refund_Base_Amount"] = (
+            pd.to_numeric(grouped["Refund_Base_Amount"], errors="coerce").fillna(0.0).round(2)
+        )
     preferred = [
         "Date",
         "Order",
@@ -174,8 +209,14 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         "Shipped_Date",
         "Days_In_Transit",
         "Revenue",
+        "Refunds_Total",
+        "Refund_Base_Amount",
+        "Refund_Ratio_pct",
+        "Refund_Bucket",
+        "Net_Revenue_After_Refunds",
         "Product_Cost",
         "Gross_Profit",
+        "Gross_Profit_After_Refunds",
     ]
     ordered = [c for c in preferred if c in grouped.columns]
     rest = [c for c in grouped.columns if c not in ordered]

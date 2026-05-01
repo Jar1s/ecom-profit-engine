@@ -8,7 +8,7 @@ import pandas as pd
 
 from config import Settings
 
-SheetKind = Literal["orders", "order_level", "meta", "meta_campaigns", "daily", "bookkeeping"]
+SheetKind = Literal["orders", "order_level", "meta", "meta_campaigns", "daily", "bookkeeping", "payouts"]
 
 # Summary rows need enough columns; narrow dataframes (e.g. META_DATA with 3 cols) would otherwise
 # truncate _pad(..., row) and drop trailing cells (including local-currency totals).
@@ -434,6 +434,8 @@ def sheet_values_with_summary(
         gp = _sum("Gross_profit")
         mkt = _sum("Marketing_advertising")
         op = _sum("Operating_income")
+        payout_fees = _sum("Payout_Fees_Total")
+        op_after_fees = _sum("Operating_Income_After_Payout_Fees")
         tax_coll = _sum("Sales_tax_collected")
 
         summary.append(
@@ -476,9 +478,46 @@ def sheet_values_with_summary(
                     round(mkt, 2),
                     "Operating_income",
                     round(op, 2),
+                    "Payout_Fees_Total",
+                    round(payout_fees, 2),
+                    "Operating_After_Fees",
+                    round(op_after_fees, 2),
                     "Sales_tax_collected (ref.)",
                     round(tax_coll, 2),
+                ],
+            )
+        )
+        summary.append(_pad(width, [""]))
+
+    elif kind == "payouts":
+        n = len(df)
+        total_fee = float(pd.to_numeric(df.get("Fee_Amount"), errors="coerce").fillna(0).sum()) if "Fee_Amount" in df.columns else 0.0
+        total_net = float(pd.to_numeric(df.get("Net_Amount"), errors="coerce").fillna(0).sum()) if "Net_Amount" in df.columns else 0.0
+        summary.append(
+            _pad(
+                width,
+                [
+                    "💸 Shopify Payouts — fee prehľad",
+                    "Transakčné fee z payoutov (náklad mimo COGS/Ads).",
+                    f"Mena reportu: {cur}",
                     "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+            )
+        )
+        summary.append(
+            _pad(
+                width,
+                [
+                    "Súčty",
+                    f"Riadkov: {n}",
+                    "Fee_Amount",
+                    round(total_fee, 2),
+                    "Net_Amount",
+                    round(total_net, 2),
                     "",
                     "",
                 ],

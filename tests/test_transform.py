@@ -162,6 +162,10 @@ class TestTransform(unittest.TestCase):
                     "Product": "A",
                     "Quantity": 1,
                     "Revenue": 10.0,
+                    "Refunds_Total": 7.5,
+                    "Refund_Base_Amount": 15.0,
+                    "Refund_Ratio_pct": 50.0,
+                    "Refund_Bucket": "Half",
                     "Product_Cost": 4.0,
                     "Gross_Profit": 6.0,
                 },
@@ -173,6 +177,10 @@ class TestTransform(unittest.TestCase):
                     "Product": "B",
                     "Quantity": 1,
                     "Revenue": 5.0,
+                    "Refunds_Total": 7.5,
+                    "Refund_Base_Amount": 15.0,
+                    "Refund_Ratio_pct": 50.0,
+                    "Refund_Bucket": "Half",
                     "Product_Cost": 2.0,
                     "Gross_Profit": 3.0,
                 },
@@ -181,8 +189,12 @@ class TestTransform(unittest.TestCase):
         out = order_level_summary(df)
         self.assertEqual(len(out), 1)
         self.assertEqual(out.loc[0, "Revenue"], 15.0)
+        self.assertEqual(out.loc[0, "Refunds_Total"], 7.5)
+        self.assertEqual(out.loc[0, "Refund_Bucket"], "Half")
+        self.assertEqual(out.loc[0, "Net_Revenue_After_Refunds"], 7.5)
         self.assertEqual(out.loc[0, "Product_Cost"], 6.0)
         self.assertEqual(out.loc[0, "Gross_Profit"], 9.0)
+        self.assertEqual(out.loc[0, "Gross_Profit_After_Refunds"], 1.5)
 
     def test_order_level_summary_with_shipping_columns(self) -> None:
         df = pd.DataFrame(

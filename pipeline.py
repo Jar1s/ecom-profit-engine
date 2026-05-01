@@ -156,6 +156,23 @@ def _runtime_budget_seconds() -> float:
     return 0.0
 
 
+def _skip_meta_campaign_sheet_upload(meta_campaign_df: pd.DataFrame, settings: Settings) -> bool:
+    """
+    When True, do not call upload_dataframe for META_CAMPAIGNS — keeps the existing Google Sheet tab.
+    Uploading an empty DataFrame clears the worksheet (see sheets.upload_dataframe), which made the
+    Meta campaigns tab look blank after failed/empty insights while META_DATA still had spend.
+    """
+    if not meta_campaign_df.empty:
+        return False
+    if settings.meta_campaign_insights:
+        logger.warning(
+            "META_CAMPAIGNS sheet upload skipped: zero campaign rows — leaving existing tab unchanged. "
+            "Daily META_DATA can still have spend; campaign breakdown failed or was empty "
+            "(check Meta insights logs; META_CONTINUE_ON_ERROR returns empty on insights failure)."
+        )
+    return True
+
+
 def _check_runtime_budget(
     started_total: float,
     *,
@@ -677,7 +694,7 @@ def _upload_reporting_tabs(settings: Settings, artifacts: PipelineArtifacts, *, 
         estimate=10.0,
     )
     pause_between_sheet_uploads()
-    if not artifacts.meta_campaign_df.empty or settings.meta_campaign_insights:
+    if not _skip_meta_campaign_sheet_upload(artifacts.meta_campaign_df, settings):
         _run_step(
             "sheet_meta_campaigns",
             lambda: upload_dataframe(
@@ -714,7 +731,7 @@ def _upload_full_tabs(settings: Settings, artifacts: PipelineArtifacts, *, start
 
     _upload_core_tabs(settings, artifacts, started_total=started_total)
     pause_between_sheet_uploads()
-    if settings.meta_campaign_insights:
+    if not _skip_meta_campaign_sheet_upload(artifacts.meta_campaign_df, settings):
         _run_step(
             "sheet_meta_campaigns",
             lambda: upload_dataframe(
@@ -785,7 +802,7 @@ def _upload_business_tabs(settings: Settings, artifacts: PipelineArtifacts, *, s
         estimate=10.0,
     )
     pause_between_sheet_uploads()
-    if not artifacts.meta_campaign_df.empty or settings.meta_campaign_insights:
+    if not _skip_meta_campaign_sheet_upload(artifacts.meta_campaign_df, settings):
         _run_step(
             "sheet_meta_campaigns",
             lambda: upload_dataframe(

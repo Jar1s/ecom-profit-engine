@@ -481,6 +481,9 @@ def _settings_for_tracking_mode(settings: Settings) -> Settings:
     return dc_replace(
         settings,
         meta_campaign_insights=False,
+        # Tracking runs are latency-sensitive (Vercel timeout risk). Keep table writes lightweight.
+        sheets_fancy_layout=False,
+        sheets_conditional_format=False,
     )
 
 
@@ -855,12 +858,12 @@ def _run_tracking(settings: Settings, cost_maps, state: PipelineState) -> Pipeli
         )
     settings_tracking = _settings_for_tracking_mode(settings)
     log_shopify_auth_config(settings_tracking)
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=1) as executor:
         orders_future = executor.submit(fetch_orders_by_ids, settings_tracking, candidate_ids)
-        meta_future = executor.submit(_fetch_meta_daily_safe, settings)
         raw_orders = orders_future.result()
-        meta_rows = meta_future.result()
-    meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
+    # Tracking mode refreshes shipment/delivery fields only; reuse existing META_DATA
+    # so expired Meta tokens do not break/slow tracking cron runs.
+    meta_rows = _meta_frame_to_rows(_load_meta_df(settings), settings)
     refreshed_orders, refreshed_rows = fetch_orders_and_line_rows(settings_tracking, orders=raw_orders)
     merged_orders_df = _merge_orders_df(
         existing_orders_df,

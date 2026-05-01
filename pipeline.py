@@ -386,6 +386,21 @@ def _merge_orders_df(existing: pd.DataFrame, changed: pd.DataFrame) -> pd.DataFr
 
 
 def _merge_meta_df(existing: pd.DataFrame, fresh: pd.DataFrame) -> pd.DataFrame:
+    def _drop_duplicate_columns(df: pd.DataFrame, label: str) -> pd.DataFrame:
+        if df.empty:
+            return df
+        if not df.columns.is_unique:
+            dupes = df.columns[df.columns.duplicated()].tolist()
+            logger.warning(
+                "META_DATA %s has duplicate columns; keeping first occurrence only: %s",
+                label,
+                ",".join(str(name) for name in dupes),
+            )
+            return df.loc[:, ~df.columns.duplicated()].copy()
+        return df
+
+    existing = _drop_duplicate_columns(existing, "existing frame")
+    fresh = _drop_duplicate_columns(fresh, "fresh frame")
     if existing.empty:
         return fresh.copy()
     if fresh.empty:

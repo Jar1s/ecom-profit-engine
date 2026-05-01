@@ -171,8 +171,9 @@ def _check_runtime_budget(
         raise RuntimeError(
             "runtime budget reached before step="
             f"{step} (elapsed={elapsed:.1f}s, budget={budget:.1f}s, remaining={remaining:.1f}s). "
-            "Use PIPELINE_MODE=business/core/tracking/reporting, disable heavy sheets formatting "
-            "(SHEETS_FANCY_LAYOUT=0, SHEETS_CONDITIONAL_FORMAT=0), or increase function timeout."
+            "Raise or disable PIPELINE_RUNTIME_BUDGET_SECONDS (unset on Vercel defaults to 285s; set 0 to disable). "
+            "Lighten work: PIPELINE_MODE split, SHEETS_FANCY_LAYOUT=0, SHEETS_CONDITIONAL_FORMAT=0, "
+            "or increase Vercel Function Max Duration."
         )
 
 
@@ -1216,6 +1217,12 @@ def main(mode_override: str | None = None, run_overrides: dict[str, Any] | None 
             mode=mode,
             shopify_updated_at_max=artifacts.shopify_updated_at_max,
         )
+        try:
+            from api.dashboard import clear_dashboard_bundle_cache
+
+            clear_dashboard_bundle_cache()
+        except Exception:
+            pass
         _log_completion(artifacts, started_total)
         return 0
     except Exception as exc:

@@ -4,7 +4,7 @@
   "buildCommand": "cd dashboard-web && npm run build",
   "crons": [
     {
-      "path": "/cron",
+      "path": "/cron/business",
       "schedule": "*/10 * * * *"
     }
   ]

@@ -137,10 +137,10 @@ def _timed(phase: str, fn):
 
 def _runtime_budget_seconds() -> float:
     """
-    Soft guard against hard platform timeout (e.g. Vercel 300s).
+    Soft guard before expensive steps so we fail with guidance instead of a hard platform kill.
     PIPELINE_RUNTIME_BUDGET_SECONDS:
       - <= 0: disabled
-      - unset + Vercel runtime: defaults to 285s
+      - unset + Vercel runtime: defaults to 770s (~800s Pro max duration minus headroom)
       - unset outside Vercel: disabled
     """
     raw = (os.getenv("PIPELINE_RUNTIME_BUDGET_SECONDS") or "").strip()
@@ -152,7 +152,7 @@ def _runtime_budget_seconds() -> float:
             return 0.0
         return v if v > 0 else 0.0
     if (os.getenv("VERCEL") or "").strip() == "1":
-        return 285.0
+        return 770.0
     return 0.0
 
 
@@ -171,7 +171,7 @@ def _check_runtime_budget(
         raise RuntimeError(
             "runtime budget reached before step="
             f"{step} (elapsed={elapsed:.1f}s, budget={budget:.1f}s, remaining={remaining:.1f}s). "
-            "Raise or disable PIPELINE_RUNTIME_BUDGET_SECONDS (unset on Vercel defaults to 285s; set 0 to disable). "
+            "Raise or disable PIPELINE_RUNTIME_BUDGET_SECONDS (unset on Vercel defaults to 770s; set 0 to disable). "
             "Lighten work: PIPELINE_MODE split, SHEETS_FANCY_LAYOUT=0, SHEETS_CONDITIONAL_FORMAT=0, "
             "or increase Vercel Function Max Duration."
         )

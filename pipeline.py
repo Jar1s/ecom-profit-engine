@@ -594,7 +594,6 @@ def _build_artifacts(
         lambda: enrich_usd_columns(order_level_summary(orders_df), settings.usd_per_local),
     )
     daily_df = _timed("daily", lambda: daily_summary_from_orders(orders_df))
-    meta_df = _timed("meta_transform", lambda: _build_meta_df(meta_rows, settings))
     meta_campaign_df = pd.DataFrame()
     if meta_campaign_rows is not None:
         meta_campaign_df = _timed(
@@ -605,21 +604,25 @@ def _build_artifacts(
                 meta_spend_in_usd=settings.meta_spend_in_usd,
             ),
         )
+
+    meta_for_daily = meta_rows
+    if settings.daily_meta_from_campaign_sum and not meta_campaign_df.empty:
+        meta_for_daily = _daily_meta_rows_prefer_campaign_sum(meta_rows, meta_campaign_df)
+        logger.info(
+            "META_DATA + daily merge: campaign×day spend sums (%s distinct dates) — aligns with META_CAMPAIGNS",
+            meta_campaign_df["Date"].astype(str).str.strip().nunique()
+            if "Date" in meta_campaign_df.columns
+            else 0,
+        )
+
+    meta_df = _timed("meta_transform", lambda: _build_meta_df(meta_for_daily, settings))
+
     if settings.meta_spend_in_usd and not settings.usd_per_local:
         logger.warning(
             "META_SPEND_IN_USD=1 but USD_PER_LOCAL_UNIT is unset: "
             "daily merge may mix Meta USD with Shopify shop currency for ROAS."
         )
     logger.info("Merging daily summary with Meta spend …")
-    meta_for_daily = meta_rows
-    if settings.daily_meta_from_campaign_sum and not meta_campaign_df.empty:
-        meta_for_daily = _daily_meta_rows_prefer_campaign_sum(meta_rows, meta_campaign_df)
-        logger.info(
-            "Daily Meta merge uses campaign×day sums (%s days) — aligns Ad_Spend with META_CAMPAIGNS roll-ups",
-            meta_campaign_df["Date"].astype(str).str.strip().nunique()
-            if "Date" in meta_campaign_df.columns
-            else 0,
-        )
     meta_for_merge = meta_rows_for_daily_merge(
         meta_for_daily,
         meta_spend_in_usd=settings.meta_spend_in_usd,

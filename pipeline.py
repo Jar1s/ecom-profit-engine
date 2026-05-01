@@ -436,9 +436,10 @@ def _meta_frame_to_rows(meta_df: pd.DataFrame, settings: Settings) -> list[dict[
     if "Ad_Spend" in meta_df.columns:
         src = meta_df[["Date", "Ad_Spend"]].copy()
     elif "Ad_Spend_USD" in meta_df.columns:
+        # Keep USD here. :func:`transform.meta_rows_for_daily_merge` is the single place that
+        # converts Meta USD → shop currency when META_SPEND_IN_USD + USD_PER_LOCAL_UNIT (previously
+        # we divided here too, which double-converted and inflated DAILY_SUMMARY Ad_Spend).
         src = meta_df[["Date", "Ad_Spend_USD"]].rename(columns={"Ad_Spend_USD": "Ad_Spend"}).copy()
-        if settings.meta_spend_in_usd and settings.usd_per_local:
-            src["Ad_Spend"] = src["Ad_Spend"].astype(float) / float(settings.usd_per_local)
     else:
         return []
     src["Date"] = src["Date"].astype(str)

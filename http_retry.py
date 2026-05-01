@@ -10,11 +10,25 @@ import requests
 
 from config import Settings
 
-_SHOPIFY_403_HINT = (
-    " In Shopify Admin → Settings → Apps → your app: add Admin API scope "
-    "**read_orders** (and save), then **reinstall** the app on the store so the "
-    "new token includes that scope."
+_SHOPIFY_403_HINT_ORDERS = (
+    " In Shopify Admin → Settings → Apps and sales channels → Develop apps → your app → "
+    "Configuration: add Admin API scope **read_orders** (and save), then **reinstall** the app "
+    "on the store so the new token includes that scope."
 )
+
+_SHOPIFY_403_HINT_PAYOUTS = (
+    " In Shopify Admin → Settings → Apps and sales channels → Develop apps → your app → "
+    "Configuration: enable Admin API scope **read_shopify_payments_payouts**, Save, then "
+    "**Install app** again (or create a new Admin API access token). "
+    "Shopify Payments must be enabled; the store owner may need to approve payout access."
+)
+
+
+def _shopify_403_hint(url: str | None) -> str:
+    u = (url or "").lower()
+    if "shopify_payments" in u:
+        return _SHOPIFY_403_HINT_PAYOUTS
+    return _SHOPIFY_403_HINT_ORDERS
 
 _SHOPIFY_401_HINT = (
     " Check SHOPIFY_TOKEN (Custom App Admin API access token, usually starts with shpat_) "
@@ -130,7 +144,7 @@ def get_response(
                 else:
                     msg = f"{msg} for {response.url}"
                 if response.status_code == 403 and "myshopify.com" in (response.url or ""):
-                    msg = msg + _SHOPIFY_403_HINT
+                    msg = msg + _shopify_403_hint(response.url)
                 if response.status_code == 401 and "myshopify.com" in (response.url or ""):
                     msg = msg + _SHOPIFY_401_HINT
                 raise RuntimeError(msg) from None
@@ -172,7 +186,7 @@ def post_json_with_retry(
                 else:
                     msg = f"{msg} for {response.url}"
                 if response.status_code == 403 and "myshopify.com" in (response.url or ""):
-                    msg = msg + _SHOPIFY_403_HINT
+                    msg = msg + _shopify_403_hint(response.url)
                 raise RuntimeError(msg) from None
             return response.json()
         except requests.RequestException as exc:

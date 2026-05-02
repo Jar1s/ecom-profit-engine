@@ -22,6 +22,7 @@ from sheets_formatting import (
     apply_center_alignment,
     apply_data_column_widths,
     apply_data_conditional_formatting,
+    apply_orders_tab_number_formats,
     apply_summary_dashboard_format,
 )
 
@@ -65,19 +66,32 @@ def _inter_chunk_pause() -> None:
         time.sleep(sec)
 
 
+def _transient_sheet_http_status(status_code: int | None) -> bool:
+    """429 quota; 5xx often transient on Google's side (Sheets metadata open, reads, writes)."""
+    if status_code is None:
+        return False
+    if status_code == 429:
+        return True
+    return status_code in (500, 502, 503, 504)
+
+
 def _retry_sheet_api(fn: Callable[[], _T], *, what: str = "Sheets API") -> _T:
-    """Retry on HTTP 429 (Sheets read/write quota per minute)."""
+    """Retry on HTTP 429 and transient 5xx (Google occasional internal errors)."""
     max_attempts = 10
     for attempt in range(max_attempts):
         try:
             return fn()
         except gspread.exceptions.APIError as exc:
             sc = getattr(exc.response, "status_code", None)
-            if sc == 429 and attempt < max_attempts - 1:
-                delay = min(120.0, (2.0**attempt) * 1.25) + random.uniform(0.25, 1.5)
+            if _transient_sheet_http_status(sc) and attempt < max_attempts - 1:
+                if sc == 429:
+                    delay = min(120.0, (2.0**attempt) * 1.25) + random.uniform(0.25, 1.5)
+                else:
+                    delay = min(90.0, (1.6**attempt) * 2.0) + random.uniform(0.2, 1.0)
                 logger.warning(
-                    "%s rate limit (429), sleeping %.1fs [%s/%s]: %s",
+                    "%s HTTP %s, sleeping %.1fs [%s/%s]: %s",
                     what,
+                    sc or "?",
                     delay,
                     attempt + 1,
                     max_attempts,
@@ -144,11 +158,23 @@ def _open_spreadsheet(client: gspread.Client, settings: Settings) -> gspread.Spr
             "Or set GOOGLE_SHEET_ID or GOOGLE_SHEET_URL (full browser URL) and redeploy."
         ) from exc
     except gspread.exceptions.APIError as exc:
-        raise RuntimeError(
-            f"Google Sheets API error: {exc}. "
-            "Enable Sheets API (and Drive API if opening by name only) for the GCP project; "
-            "share the file with the service account."
-        ) from exc
+        sc = getattr(exc.response, "status_code", None)
+        if sc in (500, 502, 503, 504):
+            hint = (
+                "Transient Google server error after retries — wait a minute and re-run the pipeline. "
+                "If it keeps happening, check https://www.google.com/appsstatus — not a missing API enable."
+            )
+        elif sc == 429:
+            hint = (
+                "Quota (429) after retries — increase SHEETS_PAUSE_BETWEEN_TABS_SECONDS or spread jobs; "
+                "share the spreadsheet with the service account (Editor)."
+            )
+        else:
+            hint = (
+                "Enable Sheets API (and Drive API if opening by name only) for the GCP project; "
+                "share the file with the service account (Editor)."
+            )
+        raise RuntimeError(f"Google Sheets API error: {exc}. {hint}") from exc
 
 
 def get_or_create_supplier_costs_worksheet(
@@ -490,6 +516,18 @@ def upload_dataframe(
         ),
         what="format",
     )
+
+    if layout_kind in ("orders", "order_level"):
+        cols = list(df.columns)
+        _retry_sheet_write(
+            lambda: apply_orders_tab_number_formats(
+                ws,
+                header_row_1based=header_row,
+                num_sheet_rows=len(values),
+                columns=cols,
+            ),
+            what="format",
+        )
 
     logger.info(
         "Sheet %r: uploaded %s cell rows (header row=%s)",

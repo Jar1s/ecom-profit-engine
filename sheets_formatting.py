@@ -494,3 +494,111 @@ def apply_data_column_widths(ws: gspread.Worksheet, num_cols: int, min_width: in
         )
     except Exception as exc:
         logger.warning("Column width update skipped: %s", exc)
+
+
+# Small numeric values (0,1,2,18,…) are often auto-displayed as serial dates (1899/1900).
+# Force per-column formats on ORDERS_DB / ORDER_LEVEL data rows after upload.
+_ORDERS_MONEY_NUMBER_FORMAT: dict[str, Any] = {"type": "NUMBER", "pattern": "#,##0.00"}
+_ORDERS_INT_NUMBER_FORMAT: dict[str, Any] = {"type": "NUMBER", "pattern": "0"}
+_ORDERS_GENERAL_NUMBER_FORMAT: dict[str, Any] = {"type": "NUMBER", "pattern": "#,##0.##########"}
+_ORDERS_TEXT_NUMBER_FORMAT: dict[str, Any] = {"type": "TEXT"}
+
+# Do not apply numeric display to these — keeps ISO dates and free text from being parsed as numbers.
+_ORDERS_TAB_TEXT_COLUMNS: frozenset[str] = frozenset(
+    {
+        "Date",
+        "Order",
+        "Product",
+        "Payment_Gateway_Names",
+        "Fulfillment_Status",
+        "Shipment_Status",
+        "Delivery_Status",
+        "Tracking_Numbers",
+        "Tracking_Companies",
+        "Carrier_Tracking_Status",
+        "Shipped_Date",
+        "SKU",
+    }
+)
+
+_ORDERS_MONEY_COLUMNS: frozenset[str] = frozenset(
+    {
+        "Revenue",
+        "Product_Cost",
+        "Gross_Profit",
+        "Refunds_Total",
+        "Net_Revenue_After_Refunds",
+        "Gross_Profit_After_Refunds",
+        "Payment_Net",
+        "Payment_Net_Estimate",
+        "Revenue_USD",
+        "Gross_Profit_USD",
+    }
+)
+
+_ORDERS_INT_COLUMNS: frozenset[str] = frozenset(
+    {
+        "Quantity",
+        "Days_In_Transit",
+        "Order_ID",
+        "Line_Item_ID",
+    }
+)
+
+_BATCH_REPEAT_CELL_MAX = 90
+
+
+def apply_orders_tab_number_formats(
+    ws: gspread.Worksheet,
+    *,
+    header_row_1based: int,
+    num_sheet_rows: int,
+    columns: list[str],
+) -> None:
+    """
+    Apply explicit TEXT / NUMBER formats to every data column on ORDERS_DB / ORDER_LEVEL
+    so Sheets never treats 0, 1, 2, … as serial dates (e.g. Quantity → 1899-12-30).
+    """
+    if num_sheet_rows <= header_row_1based:
+        return
+    sheet_id = ws.id
+    data_start_0 = header_row_1based
+    data_end_excl = num_sheet_rows
+
+    requests: list[dict[str, Any]] = []
+    for name in columns:
+        ci = _col_index(columns, name)
+        if ci is None:
+            continue
+        if name in _ORDERS_TAB_TEXT_COLUMNS:
+            fmt: dict[str, Any] = _ORDERS_TEXT_NUMBER_FORMAT
+        elif name in _ORDERS_MONEY_COLUMNS:
+            fmt = _ORDERS_MONEY_NUMBER_FORMAT
+        elif name in _ORDERS_INT_COLUMNS:
+            fmt = _ORDERS_INT_NUMBER_FORMAT
+        else:
+            # Future numeric columns: still force NUMBER so Sheets does not use date heuristics.
+            fmt = _ORDERS_GENERAL_NUMBER_FORMAT
+        requests.append(
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": data_start_0,
+                        "endRowIndex": data_end_excl,
+                        "startColumnIndex": ci,
+                        "endColumnIndex": ci + 1,
+                    },
+                    "cell": {"userEnteredFormat": {"numberFormat": fmt}},
+                    "fields": "userEnteredFormat.numberFormat",
+                }
+            }
+        )
+
+    if not requests:
+        return
+    try:
+        for i in range(0, len(requests), _BATCH_REPEAT_CELL_MAX):
+            ws.spreadsheet.batch_update({"requests": requests[i : i + _BATCH_REPEAT_CELL_MAX]})
+    except Exception as exc:
+        logger.warning("Orders tab number format update skipped: %s", exc)

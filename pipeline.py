@@ -953,7 +953,7 @@ def _save_state_error(settings: Settings, state: PipelineState, mode: str, exc: 
         save_pipeline_state(settings, dc_replace(state, last_error_summary=summary))
     except Exception as save_exc:
         logger.warning(
-            "Could not write PIPELINE_STATE after pipeline failure (quota or API); "
+            "Could not write PIPELINE_STATE after pipeline failure (quota, transient Sheets 5xx, or API); "
             "original error is still raised below: %s",
             save_exc,
         )

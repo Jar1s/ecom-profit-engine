@@ -49,20 +49,26 @@ def _line_unit_cost(
     order_counts: dict[str, int],
     lineage_map: dict[str, float],
 ) -> float:
+    """
+    Prefer **SKU** (exact + prefix rules) before product-title lineage.
+
+    Supplier sheets often key on SKU while Shopify variant titles differ; matching
+    title first could hit a broader ``Product`` row and skip the correct SKU price.
+    """
     k = row["Product_Normalized"]
-    for cand in product_title_family_levels(k):
-        pl = lineage_map.get(cand)
-        if pl is not None and pl > 0:
-            return float(pl)
     sku_raw = str(row.get("SKU") or "").strip()
     sk = normalize_sku(sku_raw)
     if sk:
         uc = cost_maps.by_sku.get(sk)
-        if uc is not None:
+        if uc is not None and float(uc) > 0:
             return float(uc)
         for prefix, cost in cost_maps.sku_prefix_rules:
-            if sk.startswith(prefix):
+            if sk.startswith(prefix) and float(cost) > 0:
                 return float(cost)
+    for cand in product_title_family_levels(k):
+        pl = lineage_map.get(cand)
+        if pl is not None and pl > 0:
+            return float(pl)
     ord_name = str(row.get("Order") or "").strip()
     if ord_name and order_counts.get(ord_name, 0) == 1:
         on = normalize_order_number(ord_name)
@@ -125,8 +131,9 @@ def reorder_orders_db_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.DataFrame:
     """
-    Unit cost resolution order: product title (vrátane „rovnaký model, iná farba“ cez odseknuté
-    koncovky `` - …``) → presné SKU → ITEM_CATALOG prefix → jednopoložková objednávka → learned ORDERS_DB.
+    Unit cost resolution order: presné SKU a ITEM_CATALOG prefix → názov produktu
+    (vrátane „rovnaký model, iná farba“ cez odseknuté `` - …``) → jednopoložková objednávka
+    (BillDetail) → learned ORDERS_DB.
     """
     df = pd.DataFrame(rows)
     if df.empty:

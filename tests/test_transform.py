@@ -78,6 +78,30 @@ class TestTransform(unittest.TestCase):
         df = enrich_line_items(rows, cost_maps)
         self.assertEqual(df.loc[0, "Product_Cost"], 22.9)
 
+    def test_enrich_line_items_prefers_sku_over_broader_product_lineage(self) -> None:
+        """Supplier SKU row should beat a shorter Product key that matches via title stripping."""
+        rows = [
+            {
+                "Date": "2026-04-01",
+                "Order": "#1",
+                "Order_ID": 1,
+                "Line_Item_ID": 10,
+                "Product": "Model - Red",
+                "SKU": "SKU-EXACT-1",
+                "Quantity": 1,
+                "Revenue": 50.0,
+            }
+        ]
+        bp = {normalize_product_name("Model"): 5.0}
+        lineage = build_product_lineage_index(bp)
+        cost_maps = CostMaps(
+            by_product=bp,
+            by_sku={"SKU-EXACT-1": 25.0},
+            by_product_lineage=lineage,
+        )
+        df = enrich_line_items(rows, cost_maps)
+        self.assertEqual(df.loc[0, "Product_Cost"], 25.0)
+
     def test_enrich_line_items_sku_prefix_same_model_other_color(self) -> None:
         """ITEM_CATALOG style: one wholesale row for FCGP42825 covers all FCGP42825.* variants."""
         rows = [

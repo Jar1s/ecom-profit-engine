@@ -15,10 +15,30 @@ from transform import (
     merge_daily_with_meta,
     meta_rows_for_daily_merge,
     order_level_summary,
+    reorder_orders_db_columns,
 )
 
 
 class TestTransform(unittest.TestCase):
+    def test_reorder_orders_db_columns(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "Shipped_Date": "2026-04-02",
+                    "Date": "2026-04-01",
+                    "Revenue": 10.0,
+                    "SKU": "S-1",
+                    "Revenue_USD": 6.5,
+                    "Future_Column_X": 1,
+                }
+            ]
+        )
+        out = reorder_orders_db_columns(df)
+        self.assertEqual(
+            list(out.columns),
+            ["Date", "SKU", "Revenue", "Revenue_USD", "Shipped_Date", "Future_Column_X"],
+        )
+
     def test_enrich_line_items(self) -> None:
         rows = [
             {

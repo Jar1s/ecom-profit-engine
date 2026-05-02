@@ -30,6 +30,7 @@ from shopify_auth import log_shopify_auth_config
 from shopify_client import fetch_all_orders, fetch_orders_and_line_rows, fetch_orders_by_ids
 from shopify_payouts import payment_net_by_order_id, payout_fee_rows, payout_fees_monthly
 from transform import (
+    ORDERS_DB_EMPTY_COLUMNS,
     daily_summary_from_orders,
     daily_summary_usd_primary,
     enrich_line_items,
@@ -38,6 +39,7 @@ from transform import (
     merge_daily_with_meta,
     meta_rows_for_daily_merge,
     order_level_summary,
+    reorder_orders_db_columns,
 )
 
 logging.basicConfig(
@@ -72,34 +74,6 @@ _META_CAMPAIGN_COLUMNS = [
     "Checkouts_Initiated",
     "Purchases",
     "Purchase_Value",
-]
-
-_ORDERS_DB_EMPTY_COLUMNS = [
-    "Date",
-    "Order",
-    "Order_ID",
-    "Fulfillment_Status",
-    "Shipment_Status",
-    "Delivery_Status",
-    "Tracking_Numbers",
-    "Tracking_Companies",
-    "Carrier_Tracking_Status",
-    "Shipped_Date",
-    "Days_In_Transit",
-    "Line_Item_ID",
-    "Product",
-    "SKU",
-    "Quantity",
-    "Revenue",
-    "Refunds_Total",
-    "Refund_Base_Amount",
-    "Refund_Ratio_pct",
-    "Refund_Bucket",
-    "Product_Cost",
-    "Gross_Profit",
-    "Payment_Gateway_Names",
-    "Payment_Net",
-    "Payment_Net_Estimate",
 ]
 
 _PAYOUTS_FEES_COLUMNS = [
@@ -310,7 +284,7 @@ def _extract_shopify_updated_at_max(orders: list[dict[str, Any]]) -> str:
 
 
 def _empty_orders_df() -> pd.DataFrame:
-    return pd.DataFrame(columns=_ORDERS_DB_EMPTY_COLUMNS)
+    return pd.DataFrame(columns=ORDERS_DB_EMPTY_COLUMNS)
 
 
 def _coerce_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
@@ -633,6 +607,7 @@ def _build_artifacts(
         orders_df = apply_payment_net_estimate(orders_df, settings)
     else:
         orders_df = orders_df.drop(columns=["Payment_Net_Estimate"], errors="ignore")
+    orders_df = reorder_orders_db_columns(orders_df)
     order_df = _timed(
         "order_level",
         lambda: enrich_usd_columns(order_level_summary(orders_df), settings.usd_per_local),

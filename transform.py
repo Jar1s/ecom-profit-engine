@@ -78,6 +78,54 @@ def _line_unit_cost(
     return 0.0
 
 
+# Logical column order for ORDERS_DB (line items): identity → product → money → payments → FX → fulfillment.
+ORDERS_DB_PREFERRED_COLUMN_ORDER: tuple[str, ...] = (
+    "Date",
+    "Order",
+    "Order_ID",
+    "Line_Item_ID",
+    "Product",
+    "SKU",
+    "Quantity",
+    "Revenue",
+    "Refunds_Total",
+    "Refund_Base_Amount",
+    "Refund_Ratio_pct",
+    "Refund_Bucket",
+    "Product_Cost",
+    "Gross_Profit",
+    "Payment_Gateway_Names",
+    "Payment_Net",
+    "Payment_Net_Estimate",
+    "Revenue_USD",
+    "Product_Cost_USD",
+    "Gross_Profit_USD",
+    "Fulfillment_Status",
+    "Shipment_Status",
+    "Delivery_Status",
+    "Tracking_Numbers",
+    "Tracking_Companies",
+    "Carrier_Tracking_Status",
+    "Shipped_Date",
+    "Days_In_Transit",
+)
+
+ORDERS_DB_EMPTY_COLUMNS = [c for c in ORDERS_DB_PREFERRED_COLUMN_ORDER if not c.endswith("_USD")]
+
+
+def reorder_orders_db_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Reorder ORDERS_DB columns for Sheets: related fields adjacent (not arbitrary dict/concat order).
+    Unknown columns (future pipeline fields) append in their original relative order.
+    """
+    if df.empty:
+        return df
+    preferred = [c for c in ORDERS_DB_PREFERRED_COLUMN_ORDER if c in df.columns]
+    seen = set(preferred)
+    rest = [c for c in df.columns if c not in seen]
+    return df[preferred + rest].copy()
+
+
 def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.DataFrame:
     """
     Unit cost resolution order: product title (vrátane „rovnaký model, iná farba“ cez odseknuté
@@ -85,35 +133,7 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.Dat
     """
     df = pd.DataFrame(rows)
     if df.empty:
-        return pd.DataFrame(
-            columns=[
-                "Date",
-                "Order",
-                "Order_ID",
-                "Fulfillment_Status",
-                "Shipment_Status",
-                "Delivery_Status",
-                "Tracking_Numbers",
-                "Tracking_Companies",
-                "Carrier_Tracking_Status",
-                "Shipped_Date",
-                "Days_In_Transit",
-                "Line_Item_ID",
-                "Product",
-                "SKU",
-                "Quantity",
-                "Revenue",
-                "Refunds_Total",
-                "Refund_Base_Amount",
-                "Refund_Ratio_pct",
-                "Refund_Bucket",
-                "Product_Cost",
-                "Gross_Profit",
-                "Payment_Gateway_Names",
-                "Payment_Net",
-                "Payment_Net_Estimate",
-            ]
-        )
+        return pd.DataFrame(columns=ORDERS_DB_EMPTY_COLUMNS)
 
     if "SKU" not in df.columns:
         df["SKU"] = ""

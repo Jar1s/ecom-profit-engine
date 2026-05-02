@@ -696,6 +696,7 @@ def _build_artifacts(
             orders_df,
             daily_final,
             payout_fees_monthly_df=payouts_fees_monthly_df,
+            shop_report_timezone=settings.shop_report_timezone,
         ),
     )
     missing_cost_df = build_missing_supplier_costs_report(orders_df)

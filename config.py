@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -83,6 +84,21 @@ class Settings:
     tracking_active_lookback_days: int
     payment_net_estimate: bool  # optional Payment_Net_Estimate when ledger Payment_Net is 0
     payment_net_estimate_fees: dict[str, dict[str, float]] | None  # bucket -> {pct, fixed}; None = unset
+    shop_report_timezone: ZoneInfo | None  # IANA; unset = legacy Date from API string slice
+
+
+def _shop_report_timezone() -> ZoneInfo | None:
+    """SHOP_REPORT_TIMEZONE=America/New_York aligns Date with Shopify admin store timezone."""
+    raw = os.getenv("SHOP_REPORT_TIMEZONE", "").strip()
+    if not raw:
+        return None
+    try:
+        return ZoneInfo(raw)
+    except Exception as exc:
+        raise RuntimeError(
+            "SHOP_REPORT_TIMEZONE must be a valid IANA timezone "
+            f"(e.g. America/New_York, Europe/Bratislava); got {raw!r}"
+        ) from exc
 
 
 def _payment_net_estimate_fees() -> dict[str, dict[str, float]] | None:
@@ -391,4 +407,5 @@ def load_settings() -> Settings:
         tracking_active_lookback_days=max(1, _optional_int("TRACKING_ACTIVE_LOOKBACK_DAYS", 30)),
         payment_net_estimate=_env_bool("PAYMENT_NET_ESTIMATE", False),
         payment_net_estimate_fees=_payment_net_estimate_fees(),
+        shop_report_timezone=_shop_report_timezone(),
     )

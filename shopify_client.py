@@ -6,6 +6,7 @@ import logging
 import re
 from datetime import date, datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from config import Settings
 from external_tracking import enrich_orders_carrier_tracking, order_tracking_columns
@@ -467,12 +468,38 @@ def enrich_orders_with_fulfillment_graphql(settings: Settings, orders: list[dict
     return n
 
 
-def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def order_report_date(created_at_iso: str, shop_tz: ZoneInfo | None) -> str:
+    """
+    Calendar day for ``Date`` column: in store timezone when ``shop_tz`` is set
+    (match Shopify admin), else legacy first 10 chars of the API string.
+    """
+    s = (created_at_iso or "").strip()
+    if not s:
+        return ""
+    if shop_tz is None:
+        return s[:10] if len(s) >= 10 else ""
+    norm = s
+    if norm.endswith("Z"):
+        norm = norm[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(norm)
+    except ValueError:
+        return s[:10] if len(s) >= 10 else ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(shop_tz).date().isoformat()
+
+
+def orders_to_line_rows(
+    orders: list[dict[str, Any]],
+    *,
+    shop_report_timezone: ZoneInfo | None = None,
+) -> list[dict[str, Any]]:
     """One row per line item; Revenue = unit price * quantity (MVP; discounts not allocated)."""
     rows: list[dict[str, Any]] = []
     for order in orders:
         created = order.get("created_at") or ""
-        date_str = created[:10] if len(created) >= 10 else ""
+        date_str = order_report_date(created, shop_report_timezone)
         order_id = order.get("id")
         order_name = order.get("name") or ""
         gateways = order.get("payment_gateway_names") or []
@@ -536,7 +563,7 @@ def fetch_orders_and_line_rows(
     enrich_orders_with_fulfillment_details(settings, selected)
     enrich_orders_with_fulfillment_graphql(settings, selected)
     enrich_orders_carrier_tracking(settings, selected)
-    rows = orders_to_line_rows(selected)
+    rows = orders_to_line_rows(selected, shop_report_timezone=settings.shop_report_timezone)
     logger.info("Shopify: %s orders -> %s line rows", len(selected), len(rows))
     return selected, rows
 

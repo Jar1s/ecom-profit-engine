@@ -2,16 +2,32 @@
 
 import unittest
 from datetime import date
+from zoneinfo import ZoneInfo
 
 from shopify_client import (
     graphql_display_to_rest_shipment,
     needs_fulfillment_detail_fetch,
+    order_report_date,
     order_shipping_columns,
     orders_to_line_rows,
 )
 
 
 class TestShopifyClient(unittest.TestCase):
+    def test_order_report_date_legacy_no_tz(self) -> None:
+        self.assertEqual(order_report_date("2026-05-02T02:00:00Z", None), "2026-05-02")
+
+    def test_order_report_date_shop_tz_new_york(self) -> None:
+        tz = ZoneInfo("America/New_York")
+        # 02:00 UTC on May 2 = May 1 evening in EDT
+        self.assertEqual(order_report_date("2026-05-02T02:00:00Z", tz), "2026-05-01")
+        # 05:00 UTC Jan 15 = midnight EST same calendar day
+        self.assertEqual(order_report_date("2026-01-15T05:00:00Z", tz), "2026-01-15")
+
+    def test_order_report_date_bratislava(self) -> None:
+        tz = ZoneInfo("Europe/Bratislava")
+        self.assertEqual(order_report_date("2026-05-01T22:00:00Z", tz), "2026-05-02")
+
     def test_needs_fulfillment_detail_fetch_empty_list(self) -> None:
         o = {"fulfillment_status": "fulfilled", "fulfillments": []}
         self.assertTrue(needs_fulfillment_detail_fetch(o, refetch_early=False))
@@ -115,6 +131,7 @@ class TestShopifyClient(unittest.TestCase):
         ]
         rows = orders_to_line_rows(orders)
         self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["Date"], "2026-04-01")
         self.assertEqual(rows[0]["Fulfillment_Status"], "fulfilled")
         self.assertEqual(rows[0]["Shipment_Status"], "in_transit")
         self.assertEqual(rows[0]["Delivery_Status"], "In transit")

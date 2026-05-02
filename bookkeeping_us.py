@@ -12,6 +12,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from zoneinfo import ZoneInfo
+
+from shopify_client import order_report_date
 
 _US_COLS = [
     "Month",
@@ -79,9 +82,11 @@ def _refund_bucket(ratio_pct: float | None) -> str:
     return "Other"
 
 
-def _order_us_row(order: dict[str, Any]) -> dict[str, Any] | None:
+def _order_us_row(
+    order: dict[str, Any], *, shop_report_timezone: ZoneInfo | None = None
+) -> dict[str, Any] | None:
     created = order.get("created_at") or ""
-    date_str = created[:10] if len(created) >= 10 else ""
+    date_str = order_report_date(created, shop_report_timezone)
     if not date_str:
         return None
     oid = order.get("id")
@@ -116,6 +121,8 @@ def bookkeeping_us_monthly(
     orders_df: pd.DataFrame,
     daily_final: pd.DataFrame,
     payout_fees_monthly_df: pd.DataFrame | None = None,
+    *,
+    shop_report_timezone: ZoneInfo | None = None,
 ) -> pd.DataFrame:
     """
     One row per calendar month with US-style column names.
@@ -129,7 +136,7 @@ def bookkeeping_us_monthly(
 
     rows: list[dict[str, Any]] = []
     for o in orders:
-        r = _order_us_row(o)
+        r = _order_us_row(o, shop_report_timezone=shop_report_timezone)
         if r:
             rows.append(r)
     if not rows:

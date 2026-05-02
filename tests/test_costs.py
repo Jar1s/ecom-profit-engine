@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from costs import load_cost_map_from_path
+from costs import load_cost_map_from_path, parse_supplier_cost_value
 
 
 class TestCosts(unittest.TestCase):
@@ -42,6 +42,35 @@ class TestCosts(unittest.TestCase):
         )
         m = _cost_maps_from_dataframe(df, source="test")
         self.assertEqual(m.by_sku["SKU-1"], 9.0)
+
+    def test_parse_supplier_cost_locale_strings(self) -> None:
+        self.assertAlmostEqual(parse_supplier_cost_value("12,50"), 12.5)
+        self.assertAlmostEqual(parse_supplier_cost_value("$19.99"), 19.99)
+        self.assertAlmostEqual(parse_supplier_cost_value("1.234,56"), 1234.56)
+        self.assertAlmostEqual(parse_supplier_cost_value("1,234.56"), 1234.56)
+        self.assertAlmostEqual(parse_supplier_cost_value("12,5 AUD"), 12.5)
+
+    def test_dataframe_sku_only_rows_register_by_sku(self) -> None:
+        from costs import _cost_maps_from_dataframe
+
+        df = pd.DataFrame(
+            [
+                {"Product": "", "Cost": "22,90", "SKU": "ABC-1"},
+                {"Product": "   ", "Cost": "$10.00", "SKU": "XYZ-9"},
+            ]
+        )
+        m = _cost_maps_from_dataframe(df, source="test")
+        self.assertEqual(m.by_product, {})
+        self.assertEqual(m.by_sku["ABC-1"], 22.9)
+        self.assertEqual(m.by_sku["XYZ-9"], 10.0)
+
+    def test_dataframe_bom_in_product_header(self) -> None:
+        from costs import _cost_maps_from_dataframe
+
+        df = pd.DataFrame([{"\ufeffProduct": "P1", "Cost": "5,5", "sku": "S1"}])
+        m = _cost_maps_from_dataframe(df, source="test")
+        self.assertEqual(m.by_product["p1"], 5.5)
+        self.assertEqual(m.by_sku["S1"], 5.5)
 
 
 if __name__ == "__main__":

@@ -388,7 +388,6 @@ def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.Data
         ("Revenue", "Revenue_USD"),
         ("Product_Cost", "Product_Cost_USD"),
         ("Gross_Profit", "Gross_Profit_USD"),
-        ("Payment_Net", "Payment_Net_USD"),
         ("Ad_Spend", "Ad_Spend_USD"),
         ("Purchase_Value", "Purchase_Value_USD"),
     ]

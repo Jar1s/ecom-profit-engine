@@ -648,7 +648,11 @@ def _build_artifacts(
     )
     daily_final = _timed(
         "merge_meta",
-        lambda: enrich_usd_columns(merge_daily_with_meta(daily_df, meta_for_merge), settings.usd_per_local),
+        lambda: enrich_usd_columns(
+            merge_daily_with_meta(daily_df, meta_for_merge),
+            settings.usd_per_local,
+            include_refunds_usd=True,
+        ),
     )
     if settings.daily_summary_usd_primary:
         daily_final = daily_summary_usd_primary(daily_final)

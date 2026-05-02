@@ -298,7 +298,11 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
         {
             "label": "Refunds 30d",
             "value": _fmt_money(refunds_30),
-            "meta": "z DAILY_SUMMARY (Refunds_Total)",
+            "meta": (
+                "z DAILY_SUMMARY (Refunds_Total v USD, rovnako ako Revenue pri USD_PRIMARY)"
+                if bundle.settings.daily_summary_usd_primary
+                else "z DAILY_SUMMARY (Refunds_Total v mene obchodu)"
+            ),
         },
         {"label": "Gross Profit 30d", "value": _fmt_money(gross_profit_30), "meta": "po supplier cost"},
         {"label": "Ad Spend 30d", "value": _fmt_money(ad_spend_30), "meta": "Meta daily spend"},

@@ -12,6 +12,7 @@ from transform import (
     daily_summary_usd_primary,
     enrich_line_items,
     enrich_meta_usd_columns,
+    enrich_usd_columns,
     merge_daily_with_meta,
     meta_rows_for_daily_merge,
     order_level_summary,
@@ -450,6 +451,39 @@ class TestTransform(unittest.TestCase):
         )
         out = daily_summary_usd_primary(df)
         self.assertEqual(out.loc[0, "Product_Cost"], 26.0)
+
+    def test_enrich_usd_columns_refunds(self) -> None:
+        df = pd.DataFrame([{"Date": "2026-04-01", "Refunds_Total": 10.0, "Revenue": 100.0}])
+        out = enrich_usd_columns(df, 0.65, include_refunds_usd=True)
+        self.assertEqual(out.loc[0, "Refunds_USD"], 6.5)
+
+    def test_enrich_usd_columns_skips_refunds_by_default(self) -> None:
+        df = pd.DataFrame([{"Refunds_Total": 10.0, "Revenue": 100.0}])
+        out = enrich_usd_columns(df, 0.65)
+        self.assertNotIn("Refunds_USD", out.columns)
+        self.assertEqual(out.loc[0, "Revenue_USD"], 65.0)
+
+    def test_daily_summary_usd_primary_replaces_refunds_with_usd(self) -> None:
+        """Refunds_Total on sheet becomes USD when Refunds_USD exists (same rate as Revenue)."""
+        df = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-04-01",
+                    "Revenue": 100.0,
+                    "Refunds_Total": 10.0,
+                    "Product_Cost": 40.0,
+                    "Gross_Profit": 60.0,
+                    "Ad_Spend": 25.0,
+                    "Revenue_USD": 65.0,
+                    "Refunds_USD": 6.5,
+                    "Gross_Profit_USD": 39.0,
+                    "Ad_Spend_USD": 16.25,
+                }
+            ]
+        )
+        out = daily_summary_usd_primary(df)
+        self.assertEqual(out.loc[0, "Refunds_Total"], 6.5)
+        self.assertNotIn("Refunds_USD", out.columns)
 
     def test_bookkeeping_monthly_from_daily(self) -> None:
         daily = pd.DataFrame(

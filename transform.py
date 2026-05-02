@@ -424,20 +424,31 @@ def merge_daily_with_meta(daily: pd.DataFrame, meta_rows: list[dict[str, Any]]) 
     return merged
 
 
-def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.DataFrame:
+def enrich_usd_columns(
+    df: pd.DataFrame,
+    usd_per_local: float | None,
+    *,
+    include_refunds_usd: bool = False,
+) -> pd.DataFrame:
     """
     Append *_USD columns by multiplying local currency columns by USD_PER_LOCAL_UNIT
     (how many USD for one unit of shop/report currency, e.g. 0.65 if 1 AUD ≈ 0.65 USD).
+
+    Refunds: Shopify amounts are in shop currency. ``Refunds_Total`` → ``Refunds_USD`` is
+    only appended when ``include_refunds_usd`` is True (DAILY_SUMMARY merge) so order-level
+    sheets keep a single shop-currency refunds column.
     """
     if not usd_per_local or usd_per_local <= 0:
         return df
     out = df.copy()
-    pairs = [
+    pairs: list[tuple[str, str]] = [
         ("Revenue", "Revenue_USD"),
         ("Gross_Profit", "Gross_Profit_USD"),
         ("Ad_Spend", "Ad_Spend_USD"),
         ("Purchase_Value", "Purchase_Value_USD"),
     ]
+    if include_refunds_usd:
+        pairs.insert(1, ("Refunds_Total", "Refunds_USD"))
     for src, dst in pairs:
         if src not in out.columns:
             continue
@@ -449,8 +460,10 @@ def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.Data
 def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
     """
     For DAILY_SUMMARY only: drop shop-currency columns and use ``*_USD`` as the main
-    columns (renamed to Revenue, Product_Cost, Gross_Profit, Ad_Spend). Recomputes
-    ``Marketing_ROAS`` and adds ``Net_Profit`` = Gross_Profit − Ad_Spend (same basis as ROAS).
+    columns (renamed to Revenue, Product_Cost, Gross_Profit, Ad_Spend). Refunds follow
+    shop currency in the pipeline until here: ``Refunds_USD`` replaces ``Refunds_Total``
+    so the tab is not mixing AUD refunds with USD revenue. Recomputes ``Marketing_ROAS`` and
+    adds ``Net_Profit`` = Gross_Profit − Ad_Spend (same basis as ROAS).
 
     No-op when ``USD_PER_LOCAL_UNIT`` was not applied (missing ``*_USD`` columns).
     """
@@ -474,6 +487,9 @@ def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
     if "Product_Cost_USD" in out.columns:
         out = out.drop(columns=["Product_Cost"], errors="ignore")
         out = out.rename(columns={"Product_Cost_USD": "Product_Cost"})
+    if "Refunds_USD" in out.columns:
+        out = out.drop(columns=["Refunds_Total"], errors="ignore")
+        out = out.rename(columns={"Refunds_USD": "Refunds_Total"})
 
     def roas(row: pd.Series) -> float | None:
         spend = row.get("Ad_Spend")
@@ -531,7 +547,7 @@ def enrich_meta_usd_columns(
             s = pd.to_numeric(out["Purchase_Value"], errors="coerce").fillna(0.0).round(2)
             out["Purchase_Value_USD"] = s
         return out
-    return enrich_usd_columns(df, usd_per_local)
+    return enrich_usd_columns(df, usd_per_local, include_refunds_usd=False)
 
 
 def meta_rows_for_daily_merge(

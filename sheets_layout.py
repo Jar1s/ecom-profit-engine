@@ -15,6 +15,13 @@ SheetKind = Literal["orders", "order_level", "meta", "meta_campaigns", "daily", 
 _MIN_GRID_COLS = 8
 
 
+def _numeric_col_sum(df: pd.DataFrame, col: str) -> float:
+    """Sum a column as floats; avoids string concatenation when dtype is object (e.g. from Sheets)."""
+    if col not in df.columns:
+        return 0.0
+    return float(pd.to_numeric(df[col], errors="coerce").fillna(0).sum())
+
+
 def _pad(width: int, row: list[Any]) -> list[Any]:
     r = list(row)
     while len(r) < width:
@@ -59,9 +66,9 @@ def sheet_values_with_summary(
     if kind == "orders":
         title = "📊 Detail položiek (line items)"
         n = len(df)
-        rev = float(df["Revenue"].sum()) if "Revenue" in df.columns else 0.0
-        cogs = float(df["Product_Cost"].sum()) if "Product_Cost" in df.columns else 0.0
-        gp = float(df["Gross_Profit"].sum()) if "Gross_Profit" in df.columns else 0.0
+        rev = _numeric_col_sum(df, "Revenue")
+        cogs = _numeric_col_sum(df, "Product_Cost")
+        gp = _numeric_col_sum(df, "Gross_Profit")
         summary.append(
             _pad(
                 width,
@@ -97,19 +104,19 @@ def sheet_values_with_summary(
                 "Súčty USD",
                 "",
                 "Revenue_USD",
-                round(float(df["Revenue_USD"].sum()), 2),
+                round(_numeric_col_sum(df, "Revenue_USD"), 2),
             ]
             if "Product_Cost_USD" in df.columns:
                 usd_row_orders.extend(
                     [
                         "Product_Cost_USD",
-                        round(float(df["Product_Cost_USD"].sum()), 2),
+                        round(_numeric_col_sum(df, "Product_Cost_USD"), 2),
                     ]
                 )
             usd_row_orders.extend(
                 [
                     "Gross_Profit_USD",
-                    round(float(df["Gross_Profit_USD"].sum()), 2),
+                    round(_numeric_col_sum(df, "Gross_Profit_USD"), 2),
                 ]
             )
             summary.append(_pad(width, usd_row_orders))
@@ -133,9 +140,9 @@ def sheet_values_with_summary(
     elif kind == "order_level":
         title = "📊 Súhrn objednávok"
         n = len(df)
-        rev = float(df["Revenue"].sum()) if "Revenue" in df.columns else 0.0
-        cogs = float(df["Product_Cost"].sum()) if "Product_Cost" in df.columns else 0.0
-        gp = float(df["Gross_Profit"].sum()) if "Gross_Profit" in df.columns else 0.0
+        rev = _numeric_col_sum(df, "Revenue")
+        cogs = _numeric_col_sum(df, "Product_Cost")
+        gp = _numeric_col_sum(df, "Gross_Profit")
         summary.append(
             _pad(
                 width,
@@ -162,19 +169,19 @@ def sheet_values_with_summary(
                 "Súčty USD",
                 "",
                 "Revenue_USD",
-                round(float(df["Revenue_USD"].sum()), 2),
+                round(_numeric_col_sum(df, "Revenue_USD"), 2),
             ]
             if "Product_Cost_USD" in df.columns:
                 usd_row_ol.extend(
                     [
                         "Product_Cost_USD",
-                        round(float(df["Product_Cost_USD"].sum()), 2),
+                        round(_numeric_col_sum(df, "Product_Cost_USD"), 2),
                     ]
                 )
             usd_row_ol.extend(
                 [
                     "Gross_Profit_USD",
-                    round(float(df["Gross_Profit_USD"].sum()), 2),
+                    round(_numeric_col_sum(df, "Gross_Profit_USD"), 2),
                 ]
             )
             summary.append(_pad(width, usd_row_ol))
@@ -184,7 +191,7 @@ def sheet_values_with_summary(
     elif kind == "meta":
         title = "📊 Meta Ads — denné výdavky (USD)"
         n = len(df)
-        spend_usd = float(df["Ad_Spend_USD"].sum()) if "Ad_Spend_USD" in df.columns else 0.0
+        spend_usd = _numeric_col_sum(df, "Ad_Spend_USD")
         summary.append(
             _pad(
                 width,
@@ -211,19 +218,11 @@ def sheet_values_with_summary(
     elif kind == "meta_campaigns":
         title = "📊 Meta — kampane × deň (spend + konverzie)"
         n = len(df)
-        spend = float(df["Ad_Spend"].sum()) if "Ad_Spend" in df.columns else 0.0
-        pur = float(df["Purchases"].sum()) if "Purchases" in df.columns else 0.0
-        pv = float(df["Purchase_Value"].sum()) if "Purchase_Value" in df.columns else 0.0
-        atc = (
-            float(df["Adds_to_Cart"].sum())
-            if "Adds_to_Cart" in df.columns
-            else 0.0
-        )
-        ichk = (
-            float(df["Checkouts_Initiated"].sum())
-            if "Checkouts_Initiated" in df.columns
-            else 0.0
-        )
+        spend = _numeric_col_sum(df, "Ad_Spend")
+        pur = _numeric_col_sum(df, "Purchases")
+        pv = _numeric_col_sum(df, "Purchase_Value")
+        atc = _numeric_col_sum(df, "Adds_to_Cart")
+        ichk = _numeric_col_sum(df, "Checkouts_Initiated")
         summary.append(
             _pad(
                 width,
@@ -260,17 +259,13 @@ def sheet_values_with_summary(
             )
         )
         if rate and "Ad_Spend_USD" in df.columns:
-            pv_usd = (
-                float(df["Purchase_Value_USD"].sum())
-                if "Purchase_Value_USD" in df.columns
-                else 0.0
-            )
+            pv_usd = _numeric_col_sum(df, "Purchase_Value_USD")
             summary.append(
                 _pad(
                     width,
                     [
                         "Ad_Spend USD",
-                        round(float(df["Ad_Spend_USD"].sum()), 2),
+                        round(_numeric_col_sum(df, "Ad_Spend_USD"), 2),
                         "Purchase_Value USD",
                         round(pv_usd, 2),
                         "",
@@ -287,9 +282,9 @@ def sheet_values_with_summary(
     elif kind == "daily":
         usd_only = settings.daily_summary_usd_primary and "Net_Profit" in df.columns
         n = len(df)
-        rev = float(df["Revenue"].sum()) if "Revenue" in df.columns else 0.0
-        cogs = float(df["Product_Cost"].sum()) if "Product_Cost" in df.columns else 0.0
-        gp = float(df["Gross_Profit"].sum()) if "Gross_Profit" in df.columns else 0.0
+        rev = _numeric_col_sum(df, "Revenue")
+        cogs = _numeric_col_sum(df, "Product_Cost")
+        gp = _numeric_col_sum(df, "Gross_Profit")
         orders_total = int(pd.to_numeric(df.get("Orders_Total"), errors="coerce").fillna(0).sum()) if "Orders_Total" in df.columns else 0
         orders_delivered = (
             int(pd.to_numeric(df.get("Orders_Delivered"), errors="coerce").fillna(0).sum())
@@ -305,12 +300,10 @@ def sheet_values_with_summary(
             if "Orders_Undelivered" in df.columns
             else 0
         )
-        ads = 0.0
-        if "Ad_Spend" in df.columns:
-            ads = float(df["Ad_Spend"].fillna(0).sum())
+        ads = _numeric_col_sum(df, "Ad_Spend")
 
         if usd_only:
-            net = float(df["Net_Profit"].sum()) if "Net_Profit" in df.columns else 0.0
+            net = _numeric_col_sum(df, "Net_Profit")
             title = "📊 Denný prehľad (USD) — tržby, COGS, reklama"
             summary.append(
                 _pad(
@@ -383,9 +376,7 @@ def sheet_values_with_summary(
                 )
             )
             if rate and "Revenue_USD" in df.columns:
-                ad_usd = (
-                    float(df["Ad_Spend_USD"].fillna(0).sum()) if "Ad_Spend_USD" in df.columns else 0.0
-                )
+                ad_usd = _numeric_col_sum(df, "Ad_Spend_USD")
                 summary.append(
                     _pad(
                         width,
@@ -399,7 +390,7 @@ def sheet_values_with_summary(
                             "Undelivered",
                             orders_undelivered,
                             "Revenue_USD",
-                            round(float(df["Revenue_USD"].sum()), 2),
+                            round(_numeric_col_sum(df, "Revenue_USD"), 2),
                             "Ad_Spend USD",
                             round(ad_usd, 2),
                         ],

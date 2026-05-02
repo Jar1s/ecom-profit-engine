@@ -100,7 +100,9 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.Dat
                 "Refund_Bucket",
                 "Product_Cost",
                 "Gross_Profit",
+                "Payment_Gateway_Names",
                 "Payment_Net",
+                "Payment_Net_Estimate",
             ]
         )
 
@@ -123,6 +125,10 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.Dat
     qty = df["Quantity"].astype(float) if "Quantity" in df.columns else pd.Series(1.0, index=df.index)
     df["Product_Cost"] = (unit_cost * qty).round(2)
     df["Gross_Profit"] = (df["Revenue"].astype(float) - df["Product_Cost"]).round(2)
+    if "Payment_Gateway_Names" not in df.columns:
+        df["Payment_Gateway_Names"] = ""
+    else:
+        df["Payment_Gateway_Names"] = df["Payment_Gateway_Names"].fillna("").astype(str)
     df = df.drop(columns=["Product_Normalized"], errors="ignore")
     return df
 
@@ -152,7 +158,9 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
                 "Product_Cost",
                 "Gross_Profit",
                 "Gross_Profit_After_Refunds",
+                "Payment_Gateway_Names",
                 "Payment_Net",
+                "Payment_Net_Estimate",
             ]
         )
     agg: dict[str, Any] = {
@@ -170,6 +178,10 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         agg["Refund_Bucket"] = ("Refund_Bucket", "first")
     if "Payment_Net" in df.columns:
         agg["Payment_Net"] = ("Payment_Net", "max")
+    if "Payment_Gateway_Names" in df.columns:
+        agg["Payment_Gateway_Names"] = ("Payment_Gateway_Names", "first")
+    if "Payment_Net_Estimate" in df.columns:
+        agg["Payment_Net_Estimate"] = ("Payment_Net_Estimate", "max")
     for col in (
         "Fulfillment_Status",
         "Shipment_Status",
@@ -219,6 +231,8 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         "Refund_Bucket",
         "Net_Revenue_After_Refunds",
         "Payment_Net",
+        "Payment_Gateway_Names",
+        "Payment_Net_Estimate",
         "Product_Cost",
         "Gross_Profit",
         "Gross_Profit_After_Refunds",

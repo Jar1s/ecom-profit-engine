@@ -298,7 +298,7 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
         {
             "label": "Payment net 30d",
             "value": _fmt_money(payment_net_30),
-            "meta": "Shopify Payments net po poplatkoch (ORDER_LEVEL)",
+            "meta": "Shopify Payments ledger net (ORDER_LEVEL); stĺpec Payment_Net_Estimate je len pri PAYMENT_NET_ESTIMATE",
         },
         {"label": "ROAS 30d", "value": _fmt_ratio(roas_30), "meta": "Revenue / Ad Spend"},
         {"label": "Orders 30d", "value": _fmt_int(orders_30), "meta": f"Delivered {_fmt_int(delivered_30)}"},
@@ -357,6 +357,8 @@ def recent_orders_table(bundle: DashboardBundle, limit: int = 30) -> pd.DataFram
         "Refund_Bucket",
         "Net_Revenue_After_Refunds",
         "Payment_Net",
+        "Payment_Gateway_Names",
+        "Payment_Net_Estimate",
         "Product_Cost",
         "Gross_Profit",
         "Gross_Profit_After_Refunds",

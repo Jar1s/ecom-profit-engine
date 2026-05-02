@@ -475,6 +475,11 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
         date_str = created[:10] if len(created) >= 10 else ""
         order_id = order.get("id")
         order_name = order.get("name") or ""
+        gateways = order.get("payment_gateway_names") or []
+        if isinstance(gateways, list):
+            payment_gateway_names = ", ".join(str(g).strip() for g in gateways if str(g).strip())
+        else:
+            payment_gateway_names = str(gateways).strip()
 
         ship_cols = order_shipping_columns(order)
         refund_cols = order_refund_columns(order)
@@ -510,6 +515,7 @@ def orders_to_line_rows(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "SKU": sku,
                     "Quantity": qty,
                     "Revenue": revenue,
+                    "Payment_Gateway_Names": payment_gateway_names,
                     **refund_cols,
                 }
             )

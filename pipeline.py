@@ -18,6 +18,7 @@ from config import Settings, load_settings
 from costs import load_cost_maps
 from data_quality import build_missing_supplier_costs_report, log_missing_supplier_costs
 from meta_ads import fetch_meta_campaign_insights, fetch_meta_daily_spend
+from payment_net_estimate import apply_payment_net_estimate
 from pipeline_state import PipelineState, load_pipeline_state, save_pipeline_state, utc_now_iso
 from sheets import (
     pause_between_sheet_uploads,
@@ -96,6 +97,9 @@ _ORDERS_DB_EMPTY_COLUMNS = [
     "Refund_Bucket",
     "Product_Cost",
     "Gross_Profit",
+    "Payment_Gateway_Names",
+    "Payment_Net",
+    "Payment_Net_Estimate",
 ]
 
 _PAYOUTS_FEES_COLUMNS = [
@@ -625,6 +629,10 @@ def _build_artifacts(
         lambda: _apply_payment_net_to_orders_df(enrich_line_items(line_rows, cost_maps), payout_rows_for_net),
     )
     orders_df = enrich_usd_columns(orders_df, settings.usd_per_local)
+    if settings.payment_net_estimate:
+        orders_df = apply_payment_net_estimate(orders_df, settings)
+    else:
+        orders_df = orders_df.drop(columns=["Payment_Net_Estimate"], errors="ignore")
     order_df = _timed(
         "order_level",
         lambda: enrich_usd_columns(order_level_summary(orders_df), settings.usd_per_local),

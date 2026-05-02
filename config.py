@@ -81,6 +81,33 @@ class Settings:
     pipeline_state_tab: str
     pipeline_overlap_minutes: int
     tracking_active_lookback_days: int
+    payment_net_estimate: bool  # optional Payment_Net_Estimate when ledger Payment_Net is 0
+    payment_net_estimate_fees: dict[str, dict[str, float]] | None  # bucket -> {pct, fixed}; None = unset
+
+
+def _payment_net_estimate_fees() -> dict[str, dict[str, float]] | None:
+    """Parse PAYMENT_NET_ESTIMATE_FEES_JSON: {\"paypal\": {\"pct\": 0.034, \"fixed\": 0.35}, ...}."""
+    raw = os.getenv("PAYMENT_NET_ESTIMATE_FEES_JSON", "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("PAYMENT_NET_ESTIMATE_FEES_JSON must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise RuntimeError("PAYMENT_NET_ESTIMATE_FEES_JSON must be a JSON object")
+    out: dict[str, dict[str, float]] = {}
+    for raw_key, raw_val in parsed.items():
+        if not isinstance(raw_key, str) or not isinstance(raw_val, dict):
+            continue
+        k = raw_key.strip().lower().replace(" ", "_")
+        try:
+            pct = float(raw_val.get("pct", 0))
+            fixed = float(raw_val.get("fixed", 0))
+        except (TypeError, ValueError):
+            continue
+        out[k] = {"pct": max(0.0, min(1.0, pct)), "fixed": max(0.0, fixed)}
+    return out if out else None
 
 
 def _require(name: str) -> str:
@@ -362,4 +389,6 @@ def load_settings() -> Settings:
         pipeline_state_tab=(os.getenv("PIPELINE_STATE_TAB", "PIPELINE_STATE").strip() or "PIPELINE_STATE"),
         pipeline_overlap_minutes=max(0, _optional_int("PIPELINE_OVERLAP_MINUTES", 10)),
         tracking_active_lookback_days=max(1, _optional_int("TRACKING_ACTIVE_LOOKBACK_DAYS", 30)),
+        payment_net_estimate=_env_bool("PAYMENT_NET_ESTIMATE", False),
+        payment_net_estimate_fees=_payment_net_estimate_fees(),
     )

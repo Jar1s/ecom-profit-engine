@@ -88,17 +88,14 @@ ORDERS_DB_PREFERRED_COLUMN_ORDER: tuple[str, ...] = (
     "SKU",
     "Quantity",
     "Revenue",
-    "Refunds_Total",
-    "Refund_Base_Amount",
-    "Refund_Ratio_pct",
-    "Refund_Bucket",
     "Product_Cost",
     "Gross_Profit",
+    "Refunds_Total",
+    "Refund_Base_Amount",
     "Payment_Gateway_Names",
     "Payment_Net",
     "Payment_Net_Estimate",
     "Revenue_USD",
-    "Product_Cost_USD",
     "Gross_Profit_USD",
     "Fulfillment_Status",
     "Shipment_Status",
@@ -179,13 +176,11 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
                 "Shipped_Date",
                 "Days_In_Transit",
                 "Revenue",
-                "Refunds_Total",
-                "Refund_Base_Amount",
-                "Refund_Ratio_pct",
-                "Refund_Bucket",
-                "Net_Revenue_After_Refunds",
                 "Product_Cost",
                 "Gross_Profit",
+                "Refunds_Total",
+                "Refund_Base_Amount",
+                "Net_Revenue_After_Refunds",
                 "Gross_Profit_After_Refunds",
                 "Payment_Gateway_Names",
                 "Payment_Net",
@@ -201,10 +196,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         agg["Refunds_Total"] = ("Refunds_Total", "max")
     if "Refund_Base_Amount" in df.columns:
         agg["Refund_Base_Amount"] = ("Refund_Base_Amount", "max")
-    if "Refund_Ratio_pct" in df.columns:
-        agg["Refund_Ratio_pct"] = ("Refund_Ratio_pct", "max")
-    if "Refund_Bucket" in df.columns:
-        agg["Refund_Bucket"] = ("Refund_Bucket", "first")
     if "Payment_Net" in df.columns:
         agg["Payment_Net"] = ("Payment_Net", "max")
     if "Payment_Gateway_Names" in df.columns:
@@ -220,7 +211,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         "Carrier_Tracking_Status",
         "Shipped_Date",
         "Days_In_Transit",
-        "Refund_Bucket",
     ):
         if col in df.columns:
             agg[col] = (col, "first")
@@ -233,8 +223,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
     cost_num = pd.to_numeric(grouped["Product_Cost"], errors="coerce").fillna(0.0)
     grouped["Net_Revenue_After_Refunds"] = (revenue_num - refunds_num).round(2)
     grouped["Gross_Profit_After_Refunds"] = (grouped["Net_Revenue_After_Refunds"] - cost_num).round(2)
-    if "Refund_Ratio_pct" in grouped.columns:
-        grouped["Refund_Ratio_pct"] = pd.to_numeric(grouped["Refund_Ratio_pct"], errors="coerce").round(2)
     if "Refunds_Total" in grouped.columns:
         grouped["Refunds_Total"] = refunds_num.round(2)
     if "Refund_Base_Amount" in grouped.columns:
@@ -254,17 +242,15 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         "Shipped_Date",
         "Days_In_Transit",
         "Revenue",
-        "Refunds_Total",
-        "Refund_Base_Amount",
-        "Refund_Ratio_pct",
-        "Refund_Bucket",
-        "Net_Revenue_After_Refunds",
-        "Payment_Net",
-        "Payment_Gateway_Names",
-        "Payment_Net_Estimate",
         "Product_Cost",
         "Gross_Profit",
+        "Refunds_Total",
+        "Refund_Base_Amount",
+        "Net_Revenue_After_Refunds",
         "Gross_Profit_After_Refunds",
+        "Payment_Gateway_Names",
+        "Payment_Net",
+        "Payment_Net_Estimate",
     ]
     ordered = [c for c in preferred if c in grouped.columns]
     rest = [c for c in grouped.columns if c not in ordered]
@@ -337,6 +323,7 @@ def daily_summary_from_orders(df: pd.DataFrame) -> pd.DataFrame:
                 "Revenue",
                 "Product_Cost",
                 "Gross_Profit",
+                "Refunds_Total",
                 "Orders_Total",
                 "Orders_Delivered",
                 "Orders_Undelivered",
@@ -380,6 +367,22 @@ def daily_summary_from_orders(df: pd.DataFrame) -> pd.DataFrame:
         daily["Orders_Delivered"] = 0
         daily["Orders_Undelivered"] = 0
 
+    if "Refunds_Total" in df.columns and "Order" in df.columns:
+        per_order_rf = (
+            df.groupby(["Date", "Order"], dropna=False)["Refunds_Total"]
+            .max()
+            .reset_index()
+        )
+        refunds_daily = (
+            per_order_rf.groupby("Date", dropna=False)["Refunds_Total"]
+            .sum()
+            .reset_index()
+        )
+        daily = daily.merge(refunds_daily, on="Date", how="left")
+        daily["Refunds_Total"] = pd.to_numeric(daily["Refunds_Total"], errors="coerce").fillna(0.0).round(2)
+    else:
+        daily["Refunds_Total"] = 0.0
+
     daily["Revenue"] = daily["Revenue"].round(2)
     daily["Product_Cost"] = daily["Product_Cost"].round(2)
     daily["Gross_Profit"] = daily["Gross_Profit"].round(2)
@@ -404,6 +407,8 @@ def merge_daily_with_meta(daily: pd.DataFrame, meta_rows: list[dict[str, Any]]) 
     merged["Revenue"] = merged["Revenue"].fillna(0)
     merged["Product_Cost"] = merged["Product_Cost"].fillna(0)
     merged["Gross_Profit"] = merged["Gross_Profit"].fillna(0)
+    if "Refunds_Total" in merged.columns:
+        merged["Refunds_Total"] = merged["Refunds_Total"].fillna(0)
 
     def roas(row: pd.Series) -> float | None:
         spend = row.get("Ad_Spend")
@@ -429,7 +434,6 @@ def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.Data
     out = df.copy()
     pairs = [
         ("Revenue", "Revenue_USD"),
-        ("Product_Cost", "Product_Cost_USD"),
         ("Gross_Profit", "Gross_Profit_USD"),
         ("Ad_Spend", "Ad_Spend_USD"),
         ("Purchase_Value", "Purchase_Value_USD"),
@@ -450,12 +454,7 @@ def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
 
     No-op when ``USD_PER_LOCAL_UNIT`` was not applied (missing ``*_USD`` columns).
     """
-    required = (
-        "Revenue_USD",
-        "Product_Cost_USD",
-        "Gross_Profit_USD",
-        "Ad_Spend_USD",
-    )
+    required = ("Revenue_USD", "Gross_Profit_USD", "Ad_Spend_USD")
     if not all(c in df.columns for c in required):
         logger.info(
             "daily_summary_usd_primary skipped (set USD_PER_LOCAL_UNIT for %s)",
@@ -463,16 +462,18 @@ def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
         )
         return df
     out = df.copy()
-    for c in ("Revenue", "Product_Cost", "Gross_Profit", "Ad_Spend"):
+    for c in ("Revenue", "Gross_Profit", "Ad_Spend"):
         out = out.drop(columns=[c], errors="ignore")
     out = out.rename(
         columns={
             "Revenue_USD": "Revenue",
-            "Product_Cost_USD": "Product_Cost",
             "Gross_Profit_USD": "Gross_Profit",
             "Ad_Spend_USD": "Ad_Spend",
         }
     )
+    if "Product_Cost_USD" in out.columns:
+        out = out.drop(columns=["Product_Cost"], errors="ignore")
+        out = out.rename(columns={"Product_Cost_USD": "Product_Cost"})
 
     def roas(row: pd.Series) -> float | None:
         spend = row.get("Ad_Spend")
@@ -491,6 +492,7 @@ def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
     preferred = [
         "Date",
         "Revenue",
+        "Refunds_Total",
         "Product_Cost",
         "Gross_Profit",
         "Ad_Spend",

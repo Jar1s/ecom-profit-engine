@@ -184,8 +184,6 @@ class TestTransform(unittest.TestCase):
                     "Revenue": 10.0,
                     "Refunds_Total": 7.5,
                     "Refund_Base_Amount": 15.0,
-                    "Refund_Ratio_pct": 50.0,
-                    "Refund_Bucket": "Half",
                     "Product_Cost": 4.0,
                     "Gross_Profit": 6.0,
                 },
@@ -199,8 +197,6 @@ class TestTransform(unittest.TestCase):
                     "Revenue": 5.0,
                     "Refunds_Total": 7.5,
                     "Refund_Base_Amount": 15.0,
-                    "Refund_Ratio_pct": 50.0,
-                    "Refund_Bucket": "Half",
                     "Product_Cost": 2.0,
                     "Gross_Profit": 3.0,
                 },
@@ -210,7 +206,6 @@ class TestTransform(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out.loc[0, "Revenue"], 15.0)
         self.assertEqual(out.loc[0, "Refunds_Total"], 7.5)
-        self.assertEqual(out.loc[0, "Refund_Bucket"], "Half")
         self.assertEqual(out.loc[0, "Net_Revenue_After_Refunds"], 7.5)
         self.assertEqual(out.loc[0, "Product_Cost"], 6.0)
         self.assertEqual(out.loc[0, "Gross_Profit"], 9.0)
@@ -309,6 +304,33 @@ class TestTransform(unittest.TestCase):
         merged = merge_daily_with_meta(daily, meta)
         self.assertEqual(merged.loc[0, "Marketing_ROAS"], 4.0)
 
+    def test_daily_summary_from_orders_refunds_deduped_per_order(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-05-01",
+                    "Order": "#A",
+                    "Revenue": 50.0,
+                    "Product_Cost": 20.0,
+                    "Gross_Profit": 30.0,
+                    "Refunds_Total": 10.0,
+                    "Delivery_Status": "Delivered",
+                },
+                {
+                    "Date": "2026-05-01",
+                    "Order": "#A",
+                    "Revenue": 50.0,
+                    "Product_Cost": 20.0,
+                    "Gross_Profit": 30.0,
+                    "Refunds_Total": 10.0,
+                    "Delivery_Status": "Delivered",
+                },
+            ]
+        )
+        out = daily_summary_from_orders(df)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out.loc[0, "Refunds_Total"], 10.0)
+
     def test_daily_summary_from_orders_delivery_counts(self) -> None:
         df = pd.DataFrame(
             [
@@ -340,6 +362,7 @@ class TestTransform(unittest.TestCase):
         )
         out = daily_summary_from_orders(df)
         self.assertEqual(len(out), 1)
+        self.assertEqual(out.loc[0, "Refunds_Total"], 0.0)
         self.assertEqual(out.loc[0, "Orders_Total"], 2)
         self.assertEqual(out.loc[0, "Orders_Delivered"], 1)
         self.assertEqual(out.loc[0, "Orders_Undelivered"], 1)
@@ -395,7 +418,6 @@ class TestTransform(unittest.TestCase):
                     "Gross_Profit": 60.0,
                     "Ad_Spend": 25.0,
                     "Revenue_USD": 65.0,
-                    "Product_Cost_USD": 26.0,
                     "Gross_Profit_USD": 39.0,
                     "Ad_Spend_USD": 16.25,
                     "Marketing_ROAS": 4.0,
@@ -405,9 +427,29 @@ class TestTransform(unittest.TestCase):
         out = daily_summary_usd_primary(df)
         self.assertNotIn("Revenue_USD", out.columns)
         self.assertEqual(out.loc[0, "Revenue"], 65.0)
-        self.assertEqual(out.loc[0, "Product_Cost"], 26.0)
+        self.assertEqual(out.loc[0, "Product_Cost"], 40.0)
         self.assertEqual(out.loc[0, "Net_Profit"], 22.75)
         self.assertEqual(out.loc[0, "Marketing_ROAS"], round(65.0 / 16.25, 4))
+
+    def test_daily_summary_usd_primary_with_product_cost_usd(self) -> None:
+        """When Product_Cost_USD exists (legacy sheet), it replaces Product_Cost after rename."""
+        df = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-04-01",
+                    "Revenue": 100.0,
+                    "Product_Cost": 40.0,
+                    "Gross_Profit": 60.0,
+                    "Ad_Spend": 25.0,
+                    "Revenue_USD": 65.0,
+                    "Product_Cost_USD": 26.0,
+                    "Gross_Profit_USD": 39.0,
+                    "Ad_Spend_USD": 16.25,
+                }
+            ]
+        )
+        out = daily_summary_usd_primary(df)
+        self.assertEqual(out.loc[0, "Product_Cost"], 26.0)
 
     def test_bookkeeping_monthly_from_daily(self) -> None:
         daily = pd.DataFrame(

@@ -313,7 +313,6 @@ def _load_orders_db_df(settings: Settings) -> pd.DataFrame:
             "Revenue",
             "Refunds_Total",
             "Refund_Base_Amount",
-            "Refund_Ratio_pct",
             "Product_Cost",
             "Gross_Profit",
             "Days_In_Transit",

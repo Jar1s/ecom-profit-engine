@@ -185,20 +185,67 @@ def _refunds_total(order: dict[str, Any]) -> float:
     return round(total, 2)
 
 
-def _refund_bucket(ratio_pct: float | None) -> str:
-    if ratio_pct is None:
-        return "None"
-    if 99.0 <= ratio_pct <= 101.0:
-        return "Full"
-    if 49.0 <= ratio_pct <= 51.0:
-        return "Half"
-    return "Other"
+def order_payment_gateway_label(order: dict[str, Any]) -> str:
+    """
+    Human-readable payment line for Sheets: ``payment_gateway_names`` plus card brand / wallet
+    / PayPal from successful ``transactions[].payment_details`` when Shopify returns them
+    (often only after GET /orders/{id}.json merge).
+    """
+    gateways = order.get("payment_gateway_names") or []
+    if isinstance(gateways, list):
+        base = ", ".join(str(g).strip() for g in gateways if str(g).strip())
+    else:
+        base = str(gateways or "").strip()
+
+    labels: list[str] = []
+    seen: set[str] = set()
+    for tx in order.get("transactions") or []:
+        if not isinstance(tx, dict):
+            continue
+        st = str(tx.get("status") or "").strip().lower()
+        if st in ("failure", "failed", "error", "voided", "void"):
+            continue
+        kind = str(tx.get("kind") or "").strip().lower()
+        if kind in ("refund", "void"):
+            continue
+        pd = tx.get("payment_details")
+        if isinstance(pd, dict):
+            company = str(pd.get("credit_card_company") or "").strip()
+            if company:
+                k = company.lower()
+                if k not in seen:
+                    seen.add(k)
+                    labels.append(company)
+            wallet = str(pd.get("credit_card_wallet") or "").strip()
+            if wallet:
+                wk = wallet.lower()
+                if wk not in seen:
+                    seen.add(wk)
+                    labels.append(wallet.replace("_", " ").title())
+            method = str(pd.get("payment_method_name") or "").strip()
+            if method:
+                mk = method.lower()
+                if mk not in seen and mk not in ("bogus", "bogus gateway"):
+                    seen.add(mk)
+                    labels.append(method)
+        gw = str(tx.get("gateway") or "").strip().lower()
+        if gw == "paypal" and "paypal" not in base.lower():
+            if "paypal" not in seen:
+                seen.add("paypal")
+                labels.append("PayPal")
+
+    if not labels:
+        return base
+    extra = " · ".join(labels)
+    if base:
+        return f"{base} — {extra}"
+    return extra
 
 
 def order_refund_columns(order: dict[str, Any]) -> dict[str, Any]:
     """
-    Refund metrics repeated on each line-item row so ORDER_LEVEL can aggregate by order.
-    Ratio base = subtotal + shipping (pre-refund, shop currency).
+    Refund totals repeated on each line-item row so ORDER_LEVEL can aggregate by order.
+    ``Refund_Base_Amount`` = subtotal + shipping (pre-refund, shop currency).
     """
     refunds_total = _refunds_total(order)
     try:
@@ -215,15 +262,9 @@ def order_refund_columns(order: dict[str, Any]) -> dict[str, Any]:
             except (TypeError, ValueError):
                 shipping = 0.0
     refund_base = round(max(0.0, subtotal + shipping), 2)
-    ratio_pct: float | None = None
-    if refunds_total > 0 and refund_base > 0:
-        ratio_pct = round((refunds_total / refund_base) * 100.0, 2)
-    bucket = "None" if refunds_total <= 0 else _refund_bucket(ratio_pct)
     return {
         "Refunds_Total": round(refunds_total, 2),
         "Refund_Base_Amount": refund_base,
-        "Refund_Ratio_pct": ratio_pct if ratio_pct is not None else "",
-        "Refund_Bucket": bucket,
     }
 
 
@@ -384,6 +425,9 @@ def enrich_orders_with_fulfillment_details(settings: Settings, orders: list[dict
             detail_ffs = list(detail.get("fulfillments") or [])
             if detail_ffs:
                 order["fulfillments"] = detail_ffs
+            txs = detail.get("transactions")
+            if txs is not None:
+                order["transactions"] = txs
             n += 1
         except Exception as exc:
             logger.warning("Shopify order %s: fulfillment detail fetch failed: %s", oid, exc)
@@ -502,11 +546,7 @@ def orders_to_line_rows(
         date_str = order_report_date(created, shop_report_timezone)
         order_id = order.get("id")
         order_name = order.get("name") or ""
-        gateways = order.get("payment_gateway_names") or []
-        if isinstance(gateways, list):
-            payment_gateway_names = ", ".join(str(g).strip() for g in gateways if str(g).strip())
-        else:
-            payment_gateway_names = str(gateways).strip()
+        payment_gateway_names = order_payment_gateway_label(order)
 
         ship_cols = order_shipping_columns(order)
         refund_cols = order_refund_columns(order)

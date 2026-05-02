@@ -269,6 +269,9 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
             latest_operating_income = _to_numeric(pd.Series([latest.get("Operating_income")])).iloc[0]
 
     revenue_30 = _to_numeric(daily_recent.get("Revenue", pd.Series(dtype=float))).sum()
+    refunds_30 = 0.0
+    if not daily_recent.empty and "Refunds_Total" in daily_recent.columns:
+        refunds_30 = _to_numeric(daily_recent.get("Refunds_Total", pd.Series(dtype=float))).sum()
     gross_profit_30 = _to_numeric(daily_recent.get("Gross_Profit", pd.Series(dtype=float))).sum()
     ad_spend_30 = _to_numeric(daily_recent.get("Ad_Spend", pd.Series(dtype=float))).sum()
     payouts_recent = _recent_window(bundle.payouts_fees_df, 30)
@@ -292,6 +295,11 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
 
     return [
         {"label": "Revenue 30d", "value": _fmt_money(revenue_30), "meta": "z DAILY_SUMMARY"},
+        {
+            "label": "Refunds 30d",
+            "value": _fmt_money(refunds_30),
+            "meta": "z DAILY_SUMMARY (Refunds_Total)",
+        },
         {"label": "Gross Profit 30d", "value": _fmt_money(gross_profit_30), "meta": "po supplier cost"},
         {"label": "Ad Spend 30d", "value": _fmt_money(ad_spend_30), "meta": "Meta daily spend"},
         {"label": "Payout Fees 30d", "value": _fmt_money(payout_fees_30), "meta": "Shopify payouts fees"},
@@ -352,16 +360,14 @@ def recent_orders_table(bundle: DashboardBundle, limit: int = 30) -> pd.DataFram
         "Order",
         "Order_ID",
         "Revenue",
-        "Refunds_Total",
-        "Refund_Ratio_pct",
-        "Refund_Bucket",
-        "Net_Revenue_After_Refunds",
-        "Payment_Net",
-        "Payment_Gateway_Names",
-        "Payment_Net_Estimate",
         "Product_Cost",
         "Gross_Profit",
+        "Refunds_Total",
+        "Net_Revenue_After_Refunds",
         "Gross_Profit_After_Refunds",
+        "Payment_Gateway_Names",
+        "Payment_Net",
+        "Payment_Net_Estimate",
         "Delivery_Status",
         "Shipment_Status",
         "Carrier_Tracking_Status",
@@ -381,6 +387,7 @@ def recent_daily_table(bundle: DashboardBundle, limit: int = 30) -> pd.DataFrame
     preferred = [
         "Date",
         "Revenue",
+        "Refunds_Total",
         "Product_Cost",
         "Gross_Profit",
         "Ad_Spend",

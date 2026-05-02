@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from shopify_client import (
     graphql_display_to_rest_shipment,
     needs_fulfillment_detail_fetch,
+    order_payment_gateway_label,
     order_report_date,
     order_shipping_columns,
     orders_to_line_rows,
@@ -14,6 +15,20 @@ from shopify_client import (
 
 
 class TestShopifyClient(unittest.TestCase):
+    def test_order_payment_gateway_label_includes_card_company(self) -> None:
+        order = {
+            "payment_gateway_names": ["shopify_payments"],
+            "transactions": [
+                {
+                    "kind": "sale",
+                    "status": "success",
+                    "gateway": "shopify_payments",
+                    "payment_details": {"credit_card_company": "Visa"},
+                }
+            ],
+        }
+        self.assertIn("Visa", order_payment_gateway_label(order))
+
     def test_order_report_date_legacy_no_tz(self) -> None:
         self.assertEqual(order_report_date("2026-05-02T02:00:00Z", None), "2026-05-02")
 

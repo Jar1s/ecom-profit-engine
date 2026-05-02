@@ -93,21 +93,26 @@ def sheet_values_with_summary(
             )
         )
         if rate and "Revenue_USD" in df.columns:
-            summary.append(
-                _pad(
-                    width,
+            usd_row_orders = [
+                "Súčty USD",
+                "",
+                "Revenue_USD",
+                round(float(df["Revenue_USD"].sum()), 2),
+            ]
+            if "Product_Cost_USD" in df.columns:
+                usd_row_orders.extend(
                     [
-                        "Súčty USD",
-                        "",
-                        "Revenue_USD",
-                        round(float(df["Revenue_USD"].sum()), 2),
                         "Product_Cost_USD",
                         round(float(df["Product_Cost_USD"].sum()), 2),
-                        "Gross_Profit_USD",
-                        round(float(df["Gross_Profit_USD"].sum()), 2),
-                    ],
+                    ]
                 )
+            usd_row_orders.extend(
+                [
+                    "Gross_Profit_USD",
+                    round(float(df["Gross_Profit_USD"].sum()), 2),
+                ]
             )
+            summary.append(_pad(width, usd_row_orders))
         elif not rate:
             summary.append(
                 _pad(
@@ -153,21 +158,26 @@ def sheet_values_with_summary(
             )
         )
         if rate and "Revenue_USD" in df.columns:
-            summary.append(
-                _pad(
-                    width,
+            usd_row_ol = [
+                "Súčty USD",
+                "",
+                "Revenue_USD",
+                round(float(df["Revenue_USD"].sum()), 2),
+            ]
+            if "Product_Cost_USD" in df.columns:
+                usd_row_ol.extend(
                     [
-                        "Súčty USD",
-                        "",
-                        "Revenue_USD",
-                        round(float(df["Revenue_USD"].sum()), 2),
                         "Product_Cost_USD",
                         round(float(df["Product_Cost_USD"].sum()), 2),
-                        "Gross_Profit_USD",
-                        round(float(df["Gross_Profit_USD"].sum()), 2),
-                    ],
+                    ]
                 )
+            usd_row_ol.extend(
+                [
+                    "Gross_Profit_USD",
+                    round(float(df["Gross_Profit_USD"].sum()), 2),
+                ]
             )
+            summary.append(_pad(width, usd_row_ol))
         else:
             summary.append(_pad(width, [""]))
 

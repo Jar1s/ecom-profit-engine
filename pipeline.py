@@ -304,6 +304,7 @@ def _load_orders_db_df(settings: Settings) -> pd.DataFrame:
     if df is None or df.empty:
         return _empty_orders_df()
     out = df.copy()
+    out = out.drop(columns=["Refund_Ratio_pct", "Product_Cost_USD"], errors="ignore")
     out = _coerce_numeric(
         out,
         [
@@ -312,7 +313,6 @@ def _load_orders_db_df(settings: Settings) -> pd.DataFrame:
             "Quantity",
             "Revenue",
             "Refunds_Total",
-            "Refund_Base_Amount",
             "Product_Cost",
             "Gross_Profit",
             "Days_In_Transit",

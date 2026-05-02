@@ -71,6 +71,8 @@ class Settings:
     missing_supplier_costs_tab: str | None  # Report tab: line items with Product_Cost=0; empty = off
     shopify_fulfillment_enrich: bool  # GET /orders/{id} when list omits fulfillments/shipment_status
     shopify_fulfillment_refetch_early: bool  # Also refetch when only label_* / confirmed (extra API calls)
+    shopify_payment_transaction_enrich: bool  # GET /orders/{id} when list lacks transaction payment_details
+    shopify_payment_transaction_enrich_max: int  # Max extra order GETs per run for payment labels; 0 = no cap
     shopify_graphql_fulfillment_verify: bool  # Admin GraphQL Fulfillment.displayStatus when REST not delivered
     shopify_graphql_verify_max: int  # Max GraphQL order lookups per run; 0 = no cap
     track17_api_key: str | None  # 17TRACK API — carrier status beyond Shopify (optional); None if disabled
@@ -393,6 +395,8 @@ def load_settings() -> Settings:
         missing_supplier_costs_tab=_missing_supplier_costs_tab(),
         shopify_fulfillment_enrich=_env_bool("SHOPIFY_FULFILLMENT_ENRICH", True),
         shopify_fulfillment_refetch_early=_env_bool("SHOPIFY_FULFILLMENT_REFETCH_EARLY", False),
+        shopify_payment_transaction_enrich=_env_bool("SHOPIFY_PAYMENT_TRANSACTION_ENRICH", True),
+        shopify_payment_transaction_enrich_max=_optional_int("SHOPIFY_PAYMENT_TRANSACTION_ENRICH_MAX", 500),
         shopify_graphql_fulfillment_verify=_env_bool("SHOPIFY_GRAPHQL_FULFILLMENT_VERIFY", True),
         shopify_graphql_verify_max=_optional_int("SHOPIFY_GRAPHQL_VERIFY_MAX", 500),
         track17_api_key=track17_api_key,

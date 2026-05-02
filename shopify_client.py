@@ -185,20 +185,61 @@ def _refunds_total(order: dict[str, Any]) -> float:
     return round(total, 2)
 
 
-def order_payment_gateway_label(order: dict[str, Any]) -> str:
-    """
-    Human-readable payment line for Sheets: ``payment_gateway_names`` plus card brand / wallet
-    / PayPal from successful ``transactions[].payment_details`` when Shopify returns them
-    (often only after GET /orders/{id}.json merge).
-    """
-    gateways = order.get("payment_gateway_names") or []
-    if isinstance(gateways, list):
-        base = ", ".join(str(g).strip() for g in gateways if str(g).strip())
-    else:
-        base = str(gateways or "").strip()
+def _humanize_single_gateway(raw: str) -> str:
+    """Readable gateway label for Sheets (fee bucket logic uses substring match on the full string)."""
+    s = str(raw or "").strip()
+    if not s:
+        return ""
+    key = s.lower().replace(" ", "_")
+    if key == "shopify_payments":
+        return "Shopify Payments"
+    if key == "paypal":
+        return "PayPal"
+    if key in ("bogus", "bogus_gateway"):
+        return "Bogus Gateway"
+    return s.replace("_", " ").title()
 
+
+def _humanize_payment_gateway_base(gateways: Any) -> str:
+    if isinstance(gateways, list):
+        parts = [_humanize_single_gateway(str(g).strip()) for g in gateways if str(g).strip()]
+        return ", ".join(parts)
+    return _humanize_single_gateway(str(gateways or "").strip())
+
+
+def _payment_details_last_four(pd: dict[str, Any]) -> str | None:
+    """Last four digits from Shopify masked card string, e.g. •••• 4242 → ····4242."""
+    num = str(pd.get("credit_card_number") or "")
+    digits = "".join(c for c in num if c.isdigit())
+    if len(digits) >= 4:
+        return f"····{digits[-4:]}"
+    return None
+
+
+def _collect_transaction_payment_labels(order: dict[str, Any]) -> list[str]:
+    """
+    Card brand / wallet / masked PAN tail from successful capture/sale transactions.
+    ``orders.json`` often omits ``transactions`` or ``payment_details``; merge from GET /orders/{{id}}.json.
+    """
     labels: list[str] = []
     seen: set[str] = set()
+
+    def add(label: str) -> None:
+        label = str(label).strip()
+        if not label:
+            return
+        k = label.lower()
+        if k in seen:
+            return
+        seen.add(k)
+        labels.append(label)
+
+    base_gw = order.get("payment_gateway_names") or []
+    if isinstance(base_gw, list):
+        base_joined = " ".join(str(g).lower() for g in base_gw)
+    else:
+        base_joined = str(base_gw).lower()
+
     for tx in order.get("transactions") or []:
         if not isinstance(tx, dict):
             continue
@@ -212,28 +253,32 @@ def order_payment_gateway_label(order: dict[str, Any]) -> str:
         if isinstance(pd, dict):
             company = str(pd.get("credit_card_company") or "").strip()
             if company:
-                k = company.lower()
-                if k not in seen:
-                    seen.add(k)
-                    labels.append(company)
+                add(company)
             wallet = str(pd.get("credit_card_wallet") or "").strip()
             if wallet:
-                wk = wallet.lower()
-                if wk not in seen:
-                    seen.add(wk)
-                    labels.append(wallet.replace("_", " ").title())
+                add(wallet.replace("_", " ").title())
             method = str(pd.get("payment_method_name") or "").strip()
             if method:
                 mk = method.lower()
-                if mk not in seen and mk not in ("bogus", "bogus gateway"):
-                    seen.add(mk)
-                    labels.append(method)
+                if mk not in ("bogus", "bogus gateway"):
+                    add(method)
+            tail = _payment_details_last_four(pd)
+            if tail:
+                add(tail)
         gw = str(tx.get("gateway") or "").strip().lower()
-        if gw == "paypal" and "paypal" not in base.lower():
-            if "paypal" not in seen:
-                seen.add("paypal")
-                labels.append("PayPal")
+        if gw == "paypal" and "paypal" not in base_joined:
+            add("PayPal")
 
+    return labels
+
+
+def order_payment_gateway_label(order: dict[str, Any]) -> str:
+    """
+    Human-readable payment line for Sheets: gateway names plus card / wallet / last-four
+    from successful ``transactions[].payment_details`` when Shopify returns them.
+    """
+    base = _humanize_payment_gateway_base(order.get("payment_gateway_names"))
+    labels = _collect_transaction_payment_labels(order)
     if not labels:
         return base
     extra = " · ".join(labels)
@@ -243,29 +288,8 @@ def order_payment_gateway_label(order: dict[str, Any]) -> str:
 
 
 def order_refund_columns(order: dict[str, Any]) -> dict[str, Any]:
-    """
-    Refund totals repeated on each line-item row so ORDER_LEVEL can aggregate by order.
-    ``Refund_Base_Amount`` = subtotal + shipping (pre-refund, shop currency).
-    """
-    refunds_total = _refunds_total(order)
-    try:
-        subtotal = float(order.get("subtotal_price") or 0)
-    except (TypeError, ValueError):
-        subtotal = 0.0
-    shipping = 0.0
-    tsp = order.get("total_shipping_price_set")
-    if isinstance(tsp, dict):
-        sm = tsp.get("shop_money")
-        if isinstance(sm, dict):
-            try:
-                shipping = float(sm.get("amount") or 0)
-            except (TypeError, ValueError):
-                shipping = 0.0
-    refund_base = round(max(0.0, subtotal + shipping), 2)
-    return {
-        "Refunds_Total": round(refunds_total, 2),
-        "Refund_Base_Amount": refund_base,
-    }
+    """Refund total repeated on each line-item row so ORDER_LEVEL can aggregate by order."""
+    return {"Refunds_Total": round(_refunds_total(order), 2)}
 
 
 def _delivery_status_label(order: dict[str, Any], shipment_status: str) -> str:
@@ -439,6 +463,53 @@ def enrich_orders_with_fulfillment_details(settings: Settings, orders: list[dict
     return n
 
 
+def enrich_orders_with_payment_transactions(settings: Settings, orders: list[dict[str, Any]]) -> int:
+    """
+    Merge ``transactions`` (and gateway names) from GET /orders/{id}.json when the list
+    response has no usable ``payment_details`` — otherwise ``Payment_Gateway_Names`` stays
+    at e.g. ``shopify_payments`` only. Capped by ``SHOPIFY_PAYMENT_TRANSACTION_ENRICH_MAX`` (0 = no cap).
+    """
+    if not settings.shopify_payment_transaction_enrich or not orders:
+        return 0
+    cap = settings.shopify_payment_transaction_enrich_max
+    unlimited = cap == 0
+    remaining = None if unlimited else cap
+
+    headers = {"X-Shopify-Access-Token": get_shopify_access_token(settings)}
+    base = f"https://{settings.shopify_store}/admin/api/{settings.shopify_api_version}"
+    n = 0
+    for order in orders:
+        if remaining is not None and remaining <= 0:
+            break
+        if _collect_transaction_payment_labels(order):
+            continue
+        oid = order.get("id")
+        if oid is None:
+            continue
+        url = f"{base}/orders/{oid}.json"
+        try:
+            response = get_response(url, settings=settings, params=None, headers=headers)
+            payload = response.json()
+            detail = payload.get("order") or {}
+            txs = detail.get("transactions")
+            if txs is not None:
+                order["transactions"] = txs
+            pg = detail.get("payment_gateway_names")
+            if pg is not None:
+                order["payment_gateway_names"] = pg
+            n += 1
+            if remaining is not None:
+                remaining -= 1
+        except Exception as exc:
+            logger.warning("Shopify order %s: payment transaction detail fetch failed: %s", oid, exc)
+    if n:
+        logger.info(
+            "Shopify: merged transactions from GET /orders/{{id}}.json for %s orders (payment labels)",
+            n,
+        )
+    return n
+
+
 def _should_graphql_verify_order(order: dict[str, Any]) -> bool:
     """GraphQL can expose Fulfillment.displayStatus (e.g. DELIVERED) when REST shipment_status lags."""
     fs = _fulfillment_status_str(order)
@@ -601,6 +672,7 @@ def fetch_orders_and_line_rows(
         updated_at_min=updated_at_min,
     )
     enrich_orders_with_fulfillment_details(settings, selected)
+    enrich_orders_with_payment_transactions(settings, selected)
     enrich_orders_with_fulfillment_graphql(settings, selected)
     enrich_orders_carrier_tracking(settings, selected)
     rows = orders_to_line_rows(selected, shop_report_timezone=settings.shop_report_timezone)

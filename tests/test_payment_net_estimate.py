@@ -25,6 +25,10 @@ class TestPaymentNetEstimate(unittest.TestCase):
         self.assertEqual(classify_payment_bucket("shop_pay"), "shopify_payments")
         self.assertEqual(classify_payment_bucket("shopify"), "shopify_payments")
         self.assertEqual(classify_payment_bucket("Apple Pay (via Shopify Payments)"), "shopify_payments")
+        self.assertEqual(
+            classify_payment_bucket("Shopify Payments — Visa · ····4242"),
+            "shopify_payments",
+        )
 
     def test_estimate_net_from_revenue(self) -> None:
         fees = {

@@ -78,20 +78,15 @@ def _line_unit_cost(
     return 0.0
 
 
-# Logical column order for ORDERS_DB (line items): identity → product → money → payments → FX → fulfillment.
+# Logical column order for ORDERS_DB (line items): date/order/product → money → payments → FX → fulfillment → IDs/SKU/qty.
 ORDERS_DB_PREFERRED_COLUMN_ORDER: tuple[str, ...] = (
     "Date",
     "Order",
-    "Order_ID",
-    "Line_Item_ID",
     "Product",
-    "SKU",
-    "Quantity",
     "Revenue",
     "Product_Cost",
     "Gross_Profit",
     "Refunds_Total",
-    "Refund_Base_Amount",
     "Payment_Gateway_Names",
     "Payment_Net",
     "Payment_Net_Estimate",
@@ -105,6 +100,10 @@ ORDERS_DB_PREFERRED_COLUMN_ORDER: tuple[str, ...] = (
     "Carrier_Tracking_Status",
     "Shipped_Date",
     "Days_In_Transit",
+    "Order_ID",
+    "Line_Item_ID",
+    "SKU",
+    "Quantity",
 )
 
 ORDERS_DB_EMPTY_COLUMNS = [c for c in ORDERS_DB_PREFERRED_COLUMN_ORDER if not c.endswith("_USD")]
@@ -117,6 +116,7 @@ def reorder_orders_db_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     if df.empty:
         return df
+    df = df.drop(columns=["Refund_Ratio_pct", "Product_Cost_USD"], errors="ignore")
     preferred = [c for c in ORDERS_DB_PREFERRED_COLUMN_ORDER if c in df.columns]
     seen = set(preferred)
     rest = [c for c in df.columns if c not in seen]
@@ -179,7 +179,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
                 "Product_Cost",
                 "Gross_Profit",
                 "Refunds_Total",
-                "Refund_Base_Amount",
                 "Net_Revenue_After_Refunds",
                 "Gross_Profit_After_Refunds",
                 "Payment_Gateway_Names",
@@ -194,8 +193,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
     }
     if "Refunds_Total" in df.columns:
         agg["Refunds_Total"] = ("Refunds_Total", "max")
-    if "Refund_Base_Amount" in df.columns:
-        agg["Refund_Base_Amount"] = ("Refund_Base_Amount", "max")
     if "Payment_Net" in df.columns:
         agg["Payment_Net"] = ("Payment_Net", "max")
     if "Payment_Gateway_Names" in df.columns:
@@ -225,10 +222,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
     grouped["Gross_Profit_After_Refunds"] = (grouped["Net_Revenue_After_Refunds"] - cost_num).round(2)
     if "Refunds_Total" in grouped.columns:
         grouped["Refunds_Total"] = refunds_num.round(2)
-    if "Refund_Base_Amount" in grouped.columns:
-        grouped["Refund_Base_Amount"] = (
-            pd.to_numeric(grouped["Refund_Base_Amount"], errors="coerce").fillna(0.0).round(2)
-        )
     preferred = [
         "Date",
         "Order",
@@ -245,7 +238,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         "Product_Cost",
         "Gross_Profit",
         "Refunds_Total",
-        "Refund_Base_Amount",
         "Net_Revenue_After_Refunds",
         "Gross_Profit_After_Refunds",
         "Payment_Gateway_Names",
@@ -460,7 +452,8 @@ def enrich_usd_columns(
 def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
     """
     For DAILY_SUMMARY only: drop shop-currency columns and use ``*_USD`` as the main
-    columns (renamed to Revenue, Product_Cost, Gross_Profit, Ad_Spend). Refunds follow
+    columns (renamed to Revenue, Gross_Profit, Ad_Spend). ``Product_Cost`` is left as-is
+    (one COGS column; no ``Product_Cost_USD`` duplicate). Refunds follow
     shop currency in the pipeline until here: ``Refunds_USD`` replaces ``Refunds_Total``
     so the tab is not mixing AUD refunds with USD revenue. Recomputes ``Marketing_ROAS`` and
     adds ``Net_Profit`` = Gross_Profit − Ad_Spend (same basis as ROAS).
@@ -484,9 +477,7 @@ def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
             "Ad_Spend_USD": "Ad_Spend",
         }
     )
-    if "Product_Cost_USD" in out.columns:
-        out = out.drop(columns=["Product_Cost"], errors="ignore")
-        out = out.rename(columns={"Product_Cost_USD": "Product_Cost"})
+    out = out.drop(columns=["Product_Cost_USD"], errors="ignore")
     if "Refunds_USD" in out.columns:
         out = out.drop(columns=["Refunds_Total"], errors="ignore")
         out = out.rename(columns={"Refunds_USD": "Refunds_Total"})

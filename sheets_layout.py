@@ -106,13 +106,6 @@ def sheet_values_with_summary(
                 "Revenue_USD",
                 round(_numeric_col_sum(df, "Revenue_USD"), 2),
             ]
-            if "Product_Cost_USD" in df.columns:
-                usd_row_orders.extend(
-                    [
-                        "Product_Cost_USD",
-                        round(_numeric_col_sum(df, "Product_Cost_USD"), 2),
-                    ]
-                )
             usd_row_orders.extend(
                 [
                     "Gross_Profit_USD",
@@ -171,13 +164,6 @@ def sheet_values_with_summary(
                 "Revenue_USD",
                 round(_numeric_col_sum(df, "Revenue_USD"), 2),
             ]
-            if "Product_Cost_USD" in df.columns:
-                usd_row_ol.extend(
-                    [
-                        "Product_Cost_USD",
-                        round(_numeric_col_sum(df, "Product_Cost_USD"), 2),
-                    ]
-                )
             usd_row_ol.extend(
                 [
                     "Gross_Profit_USD",

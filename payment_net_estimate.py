@@ -25,7 +25,11 @@ def classify_payment_bucket(gateway_names: str) -> str:
     s = (gateway_names or "").lower()
     if "paypal" in s:
         return "paypal"
-    if "shopify_payments" in s or ("shopify" in s and "payment" in s):
+    if (
+        "shopify_payments" in s
+        or "shopify payments" in s
+        or ("shopify" in s and "payment" in s)
+    ):
         return "shopify_payments"
     tokens = {t.strip() for t in s.replace(";", ",").split(",") if t.strip()}
     if "shopify" in tokens:

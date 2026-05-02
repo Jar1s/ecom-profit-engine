@@ -27,7 +27,28 @@ class TestShopifyClient(unittest.TestCase):
                 }
             ],
         }
-        self.assertIn("Visa", order_payment_gateway_label(order))
+        label = order_payment_gateway_label(order)
+        self.assertIn("Visa", label)
+        self.assertIn("Shopify Payments", label)
+
+    def test_order_payment_gateway_label_includes_masked_card_last_four(self) -> None:
+        order = {
+            "payment_gateway_names": ["shopify_payments"],
+            "transactions": [
+                {
+                    "kind": "capture",
+                    "status": "success",
+                    "gateway": "shopify_payments",
+                    "payment_details": {
+                        "credit_card_company": "Mastercard",
+                        "credit_card_number": "•••• •••• •••• 5555",
+                    },
+                }
+            ],
+        }
+        label = order_payment_gateway_label(order)
+        self.assertIn("Mastercard", label)
+        self.assertIn("5555", label)
 
     def test_order_report_date_legacy_no_tz(self) -> None:
         self.assertEqual(order_report_date("2026-05-02T02:00:00Z", None), "2026-05-02")

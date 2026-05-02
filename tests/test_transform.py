@@ -37,7 +37,7 @@ class TestTransform(unittest.TestCase):
         out = reorder_orders_db_columns(df)
         self.assertEqual(
             list(out.columns),
-            ["Date", "SKU", "Revenue", "Revenue_USD", "Shipped_Date", "Future_Column_X"],
+            ["Date", "Revenue", "Revenue_USD", "Shipped_Date", "SKU", "Future_Column_X"],
         )
 
     def test_enrich_line_items(self) -> None:
@@ -184,7 +184,6 @@ class TestTransform(unittest.TestCase):
                     "Quantity": 1,
                     "Revenue": 10.0,
                     "Refunds_Total": 7.5,
-                    "Refund_Base_Amount": 15.0,
                     "Product_Cost": 4.0,
                     "Gross_Profit": 6.0,
                 },
@@ -197,7 +196,6 @@ class TestTransform(unittest.TestCase):
                     "Quantity": 1,
                     "Revenue": 5.0,
                     "Refunds_Total": 7.5,
-                    "Refund_Base_Amount": 15.0,
                     "Product_Cost": 2.0,
                     "Gross_Profit": 3.0,
                 },
@@ -432,8 +430,8 @@ class TestTransform(unittest.TestCase):
         self.assertEqual(out.loc[0, "Net_Profit"], 22.75)
         self.assertEqual(out.loc[0, "Marketing_ROAS"], round(65.0 / 16.25, 4))
 
-    def test_daily_summary_usd_primary_with_product_cost_usd(self) -> None:
-        """When Product_Cost_USD exists (legacy sheet), it replaces Product_Cost after rename."""
+    def test_daily_summary_usd_primary_drops_product_cost_usd(self) -> None:
+        """Legacy Product_Cost_USD column is dropped; Product_Cost is not overwritten."""
         df = pd.DataFrame(
             [
                 {
@@ -450,7 +448,8 @@ class TestTransform(unittest.TestCase):
             ]
         )
         out = daily_summary_usd_primary(df)
-        self.assertEqual(out.loc[0, "Product_Cost"], 26.0)
+        self.assertNotIn("Product_Cost_USD", out.columns)
+        self.assertEqual(out.loc[0, "Product_Cost"], 40.0)
 
     def test_enrich_usd_columns_refunds(self) -> None:
         df = pd.DataFrame([{"Date": "2026-04-01", "Refunds_Total": 10.0, "Revenue": 100.0}])

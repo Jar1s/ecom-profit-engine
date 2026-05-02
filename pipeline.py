@@ -540,6 +540,46 @@ def _daily_meta_rows_prefer_campaign_sum(
     return out
 
 
+def _allocate_payment_net_by_line_revenue(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Split order-level payout ``Payment_Net`` across line items by ``Revenue`` share.
+
+    The ledger stores one net total per ``Order_ID``; attaching that full amount to every
+    line makes ``Payment_Net`` look larger than line ``Revenue`` / ``Gross_Profit``. After
+    lookup, each line gets ``order_net * line_revenue / sum(line_revenue)`` (rounded; drift
+    adjusted on the largest line). Orders with zero line revenue keep the full net on the
+    first line of the order.
+    """
+    if df.empty or "Order_ID" not in df.columns or "Payment_Net" not in df.columns:
+        return df
+    if "Revenue" not in df.columns:
+        return df
+    out = df.copy()
+    rev = pd.to_numeric(out["Revenue"], errors="coerce").fillna(0.0)
+    oid_series = out["Order_ID"]
+    net_dup = pd.to_numeric(out["Payment_Net"], errors="coerce").fillna(0.0)
+    order_net = net_dup.groupby(oid_series).transform("max")
+    sum_rev = rev.groupby(oid_series).transform("sum")
+    alloc = pd.Series(0.0, index=out.index, dtype=float)
+    pos = sum_rev > 0
+    alloc.loc[pos] = (order_net.loc[pos] * rev.loc[pos] / sum_rev.loc[pos]).round(2)
+    for _, grp in out.groupby("Order_ID", sort=False):
+        idx = grp.index
+        target = float(pd.to_numeric(grp["Payment_Net"], errors="coerce").fillna(0.0).iloc[0])
+        cur = float(alloc.loc[idx].sum())
+        drift = round(target - cur, 2)
+        if abs(drift) < 0.005:
+            continue
+        if float(alloc.loc[idx].sum()) == 0.0 and target != 0.0:
+            alloc.loc[idx[0]] = round(target, 2)
+            continue
+        sub = alloc.loc[idx]
+        j = sub.idxmax() if float(sub.sum()) > 0 else idx[0]
+        alloc.loc[j] = float(alloc.loc[j]) + drift
+    out["Payment_Net"] = alloc
+    return out
+
+
 def _apply_payment_net_to_orders_df(
     df: pd.DataFrame,
     payout_rows: list[dict[str, Any]] | None,
@@ -566,7 +606,7 @@ def _apply_payment_net_to_orders_df(
             return 0.0
 
     out["Payment_Net"] = oids.map(_lookup).round(2)
-    return out
+    return _allocate_payment_net_by_line_revenue(out)
 
 
 def _build_meta_df(meta_rows: list[dict[str, Any]], settings: Settings) -> pd.DataFrame:

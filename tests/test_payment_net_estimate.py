@@ -82,7 +82,7 @@ class TestPaymentNetEstimate(unittest.TestCase):
                     "Gross_Profit": 6.0,
                     "Payment_Gateway_Names": "paypal",
                     "Payment_Net": 0.0,
-                    "Payment_Net_Estimate": 9.0,
+                    "Payment_Net_Estimate": 6.0,
                 },
                 {
                     "Date": "2026-04-01",
@@ -96,7 +96,7 @@ class TestPaymentNetEstimate(unittest.TestCase):
                     "Gross_Profit": 3.0,
                     "Payment_Gateway_Names": "paypal",
                     "Payment_Net": 0.0,
-                    "Payment_Net_Estimate": 9.0,
+                    "Payment_Net_Estimate": 3.0,
                 },
             ]
         )

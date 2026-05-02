@@ -499,6 +499,8 @@ def apply_data_column_widths(ws: gspread.Worksheet, num_cols: int, min_width: in
 # Small numeric values (0,1,2,18,…) are often auto-displayed as serial dates (1899/1900).
 # Force per-column formats on ORDERS_DB / ORDER_LEVEL data rows after upload.
 _ORDERS_MONEY_NUMBER_FORMAT: dict[str, Any] = {"type": "NUMBER", "pattern": "#,##0.00"}
+# Explicit currency type so Sheets never auto-classifies small USD amounts as serial dates.
+_ORDERS_USD_CURRENCY_FORMAT: dict[str, Any] = {"type": "CURRENCY", "pattern": "$#,##0.00"}
 _ORDERS_INT_NUMBER_FORMAT: dict[str, Any] = {"type": "NUMBER", "pattern": "0"}
 _ORDERS_GENERAL_NUMBER_FORMAT: dict[str, Any] = {"type": "NUMBER", "pattern": "#,##0.##########"}
 _ORDERS_TEXT_NUMBER_FORMAT: dict[str, Any] = {"type": "TEXT"}
@@ -531,8 +533,6 @@ _ORDERS_MONEY_COLUMNS: frozenset[str] = frozenset(
         "Gross_Profit_After_Refunds",
         "Payment_Net",
         "Payment_Net_Estimate",
-        "Revenue_USD",
-        "Gross_Profit_USD",
     }
 )
 
@@ -572,6 +572,8 @@ def apply_orders_tab_number_formats(
             continue
         if name in _ORDERS_TAB_TEXT_COLUMNS:
             fmt: dict[str, Any] = _ORDERS_TEXT_NUMBER_FORMAT
+        elif name in ("Revenue_USD", "Gross_Profit_USD"):
+            fmt = _ORDERS_USD_CURRENCY_FORMAT
         elif name in _ORDERS_MONEY_COLUMNS:
             fmt = _ORDERS_MONEY_NUMBER_FORMAT
         elif name in _ORDERS_INT_COLUMNS:

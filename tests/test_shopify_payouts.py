@@ -37,6 +37,30 @@ class TestShopifyPayouts(unittest.TestCase):
         self.assertEqual(out[1002], 10.0)
         self.assertNotIn(0, out)
 
+    def test_apply_payment_net_splits_ledger_net_by_line_revenue(self) -> None:
+        from pipeline import _apply_payment_net_to_orders_df
+
+        df = pd.DataFrame(
+            [
+                {"Order_ID": 1001, "Revenue": 20.0, "Product": "a"},
+                {"Order_ID": 1001, "Revenue": 30.0, "Product": "b"},
+                {"Order_ID": 1002, "Revenue": 10.0, "Product": "c"},
+            ]
+        )
+        payout = [
+            {"Source_Order_ID": "1001", "Net_Amount": 25.0},
+            {"Source_Order_ID": "1002", "Net_Amount": 7.0},
+        ]
+        out = _apply_payment_net_to_orders_df(df, payout)
+        self.assertAlmostEqual(
+            float(out.loc[out["Order_ID"] == 1001, "Payment_Net"].sum()), 25.0, places=2
+        )
+        self.assertAlmostEqual(
+            float(out.loc[out["Order_ID"] == 1002, "Payment_Net"].sum()), 7.0, places=2
+        )
+        row20 = out[(out["Order_ID"] == 1001) & (out["Revenue"] == 20.0)].iloc[0]
+        self.assertAlmostEqual(float(row20["Payment_Net"]), 10.0, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -194,11 +194,12 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
     if "Refunds_Total" in df.columns:
         agg["Refunds_Total"] = ("Refunds_Total", "max")
     if "Payment_Net" in df.columns:
-        agg["Payment_Net"] = ("Payment_Net", "max")
+        # Line items carry a revenue share of order net; sum restores order-level payout total.
+        agg["Payment_Net"] = ("Payment_Net", "sum")
     if "Payment_Gateway_Names" in df.columns:
         agg["Payment_Gateway_Names"] = ("Payment_Gateway_Names", _first_nonempty_gateway)
     if "Payment_Net_Estimate" in df.columns:
-        agg["Payment_Net_Estimate"] = ("Payment_Net_Estimate", "max")
+        agg["Payment_Net_Estimate"] = ("Payment_Net_Estimate", "sum")
     for col in (
         "Fulfillment_Status",
         "Shipment_Status",

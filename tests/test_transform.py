@@ -210,7 +210,7 @@ class TestTransform(unittest.TestCase):
         self.assertEqual(out.loc[0, "Gross_Profit"], 9.0)
         self.assertEqual(out.loc[0, "Gross_Profit_After_Refunds"], 1.5)
 
-    def test_order_level_summary_payment_net_max_per_order(self) -> None:
+    def test_order_level_summary_payment_net_sums_line_shares(self) -> None:
         df = pd.DataFrame(
             [
                 {
@@ -223,7 +223,7 @@ class TestTransform(unittest.TestCase):
                     "Revenue": 10.0,
                     "Product_Cost": 4.0,
                     "Gross_Profit": 6.0,
-                    "Payment_Net": 9.5,
+                    "Payment_Net": 6.33,
                 },
                 {
                     "Date": "2026-04-01",
@@ -235,13 +235,13 @@ class TestTransform(unittest.TestCase):
                     "Revenue": 5.0,
                     "Product_Cost": 2.0,
                     "Gross_Profit": 3.0,
-                    "Payment_Net": 9.5,
+                    "Payment_Net": 3.17,
                 },
             ]
         )
         out = order_level_summary(df)
         self.assertEqual(len(out), 1)
-        self.assertEqual(out.loc[0, "Payment_Net"], 9.5)
+        self.assertAlmostEqual(out.loc[0, "Payment_Net"], 9.5, places=2)
 
     def test_order_level_summary_with_shipping_columns(self) -> None:
         df = pd.DataFrame(

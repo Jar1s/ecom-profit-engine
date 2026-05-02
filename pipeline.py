@@ -27,7 +27,7 @@ from sheets import (
 )
 from shopify_auth import log_shopify_auth_config
 from shopify_client import fetch_all_orders, fetch_orders_and_line_rows, fetch_orders_by_ids
-from shopify_payouts import payout_fee_rows, payout_fees_monthly
+from shopify_payouts import payment_net_by_order_id, payout_fee_rows, payout_fees_monthly
 from transform import (
     daily_summary_from_orders,
     daily_summary_usd_primary,
@@ -563,6 +563,35 @@ def _daily_meta_rows_prefer_campaign_sum(
     return out
 
 
+def _apply_payment_net_to_orders_df(
+    df: pd.DataFrame,
+    payout_rows: list[dict[str, Any]] | None,
+) -> pd.DataFrame:
+    """Attach ``Payment_Net`` from Shopify Payments payout ledger (sum of ``Net`` per order)."""
+    if df.empty:
+        return df
+    out = df.copy()
+    if not payout_rows:
+        out["Payment_Net"] = 0.0
+        return out
+    net_map = payment_net_by_order_id(payout_rows)
+    if "Order_ID" not in out.columns:
+        out["Payment_Net"] = 0.0
+        return out
+    oids = pd.to_numeric(out["Order_ID"], errors="coerce")
+
+    def _lookup(v: Any) -> float:
+        if pd.isna(v):
+            return 0.0
+        try:
+            return float(net_map.get(int(v), 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    out["Payment_Net"] = oids.map(_lookup).round(2)
+    return out
+
+
 def _build_meta_df(meta_rows: list[dict[str, Any]], settings: Settings) -> pd.DataFrame:
     meta_df_all = enrich_meta_usd_columns(
         pd.DataFrame(meta_rows),
@@ -585,10 +614,17 @@ def _build_artifacts(
     payouts_fee_rows: list[dict[str, Any]] | None = None,
     payouts_fees_existing_df: pd.DataFrame | None = None,
 ) -> PipelineArtifacts:
+    if payouts_fee_rows is not None:
+        payout_rows_for_net: list[dict[str, Any]] | None = payouts_fee_rows
+    elif payouts_fees_existing_df is not None and not payouts_fees_existing_df.empty:
+        payout_rows_for_net = payouts_fees_existing_df.to_dict("records")
+    else:
+        payout_rows_for_net = None
     orders_df = _timed(
         "enrich",
-        lambda: enrich_usd_columns(enrich_line_items(line_rows, cost_maps), settings.usd_per_local),
+        lambda: _apply_payment_net_to_orders_df(enrich_line_items(line_rows, cost_maps), payout_rows_for_net),
     )
+    orders_df = enrich_usd_columns(orders_df, settings.usd_per_local)
     order_df = _timed(
         "order_level",
         lambda: enrich_usd_columns(order_level_summary(orders_df), settings.usd_per_local),
@@ -970,13 +1006,14 @@ def _run_core(settings: Settings, cost_maps, state: PipelineState) -> PipelineAr
     settings_core = _settings_for_core_mode(settings)
     log_shopify_auth_config(settings_core)
     updated_at_min = _updated_at_min_from_state(state, settings.pipeline_overlap_minutes)
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         shopify_future = executor.submit(_fetch_shopify_incremental, settings_core, updated_at_min=updated_at_min)
         meta_future = executor.submit(_fetch_meta_daily_safe, settings)
+        payouts_future = executor.submit(payout_fee_rows, settings)
         changed_orders, changed_rows = shopify_future.result()
         meta_rows = meta_future.result()
+        payout_rows = payouts_future.result()
     meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
-    existing_payouts_fees_df = _load_payouts_fees_df(settings)
     merged_orders_df = _merge_orders_df(
         existing_orders_df,
         enrich_usd_columns(enrich_line_items(changed_rows, cost_maps), settings.usd_per_local),
@@ -989,7 +1026,7 @@ def _run_core(settings: Settings, cost_maps, state: PipelineState) -> PipelineAr
         shopify_orders=changed_orders,
         meta_rows=meta_rows,
         meta_campaign_rows=None,
-        payouts_fees_existing_df=existing_payouts_fees_df,
+        payouts_fee_rows=payout_rows,
     )
 
 

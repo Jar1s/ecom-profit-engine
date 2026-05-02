@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -18,8 +20,7 @@ from pipeline import (
     SHEET_PAYOUTS_FEES,
 )
 from pipeline_state import PipelineState, load_pipeline_state
-import logging
-from sheets import try_read_worksheet_dataframe
+from sheets import read_dashboard_sheet_tabs
 
 logger = logging.getLogger("ecom_profit_engine.dashboard")
 
@@ -38,13 +39,6 @@ class DashboardBundle:
     missing_costs_df: pd.DataFrame
 
 
-def _load_df(settings: Settings, tab: str, required: tuple[str, ...] | None = None) -> pd.DataFrame:
-    df = try_read_worksheet_dataframe(settings, tab, required_headers=required)
-    if df is None:
-        return pd.DataFrame()
-    return df.copy()
-
-
 def dataframe_to_json_records(df: pd.DataFrame) -> list[dict[str, Any]]:
     """Serialize worksheet-shaped DataFrame for JSON API (NaN → null)."""
     if df is None or df.empty:
@@ -60,12 +54,26 @@ def _load_state_safe(settings: Settings) -> PipelineState:
         return PipelineState(last_error_summary=f"Dashboard state unavailable: {exc}")
 
 
-def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
+_bundle_cache_lock = threading.Lock()
+_bundle_cache: tuple[float, str, DashboardBundle] | None = None
+
+
+def clear_dashboard_bundle_cache() -> None:
+    """Drop cached dashboard bundle (call after pipeline writes to Sheets so /app sees fresh data)."""
+    global _bundle_cache
+    with _bundle_cache_lock:
+        _bundle_cache = None
+
+
+def _dashboard_bundle_cache_key(settings: Settings) -> str:
+    return f"{settings.google_sheet_id or ''}|{settings.google_sheet_name or ''}"
+
+
+def _load_dashboard_bundle_uncached(settings: Settings) -> DashboardBundle:
     """
-    Load dashboard tabs in parallel. Each tab was previously opened sequentially (very slow).
-    ORDERS_DB and META_DATA are not used by any dashboard view — skip full-sheet reads.
+    Load dashboard tabs: one spreadsheet open + parallel tab reads (see sheets.read_dashboard_sheet_tabs).
+    Skips ORDERS_DB / META_DATA — unused by /app.
     """
-    settings = settings or load_settings()
     missing_tab = settings.missing_supplier_costs_tab
     specs: list[tuple[str, tuple[str, ...] | None]] = [
         (SHEET_ORDER_LEVEL, ("Order_ID",)),
@@ -75,22 +83,16 @@ def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
         (SHEET_PAYOUTS_FEES, ("Date",)),
         (missing_tab, None),
     ]
-    max_workers = max(
-        1,
-        min(int(os.getenv("DASHBOARD_SHEET_READ_CONCURRENCY", "10")), 16),
-    )
-
-    def _load_one(spec: tuple[str, tuple[str, ...] | None]) -> pd.DataFrame:
-        tab, req = spec
-        return _load_df(settings, tab, required=req)
-
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        f_state = ex.submit(_load_state_safe, settings)
-        futures = [ex.submit(_load_one, s) for s in specs]
-        state = f_state.result()
-        order_level_df, daily_df, meta_campaigns_df, bookkeeping_df, payouts_fees_df, missing_costs_df = (
-            f.result() for f in futures
-        )
+    state = _load_state_safe(settings)
+    sheets_out = read_dashboard_sheet_tabs(settings, specs)
+    (
+        order_level_df,
+        daily_df,
+        meta_campaigns_df,
+        bookkeeping_df,
+        payouts_fees_df,
+        missing_costs_df,
+    ) = sheets_out
 
     return DashboardBundle(
         settings=settings,
@@ -102,6 +104,35 @@ def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
         payouts_fees_df=payouts_fees_df,
         missing_costs_df=missing_costs_df,
     )
+
+
+def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
+    """
+    Cached dashboard bundle load. Repeated /api/app/* hits reuse recent Sheets reads (short TTL).
+    Set DASHBOARD_BUNDLE_CACHE_SECONDS=0 to disable.
+    """
+    global _bundle_cache
+    settings = settings or load_settings()
+    try:
+        ttl = float(os.getenv("DASHBOARD_BUNDLE_CACHE_SECONDS", "20"))
+    except ValueError:
+        ttl = 20.0
+    key = _dashboard_bundle_cache_key(settings)
+    now = time.monotonic()
+    if ttl > 0:
+        with _bundle_cache_lock:
+            if _bundle_cache is not None:
+                ts, cached_key, bundle = _bundle_cache
+                if cached_key == key and (now - ts) < ttl:
+                    return bundle
+
+    bundle = _load_dashboard_bundle_uncached(settings)
+
+    if ttl > 0:
+        with _bundle_cache_lock:
+            _bundle_cache = (time.monotonic(), key, bundle)
+
+    return bundle
 
 
 def _to_numeric(series: pd.Series) -> pd.Series:
@@ -175,6 +206,7 @@ _EXEC_THRESH_DEFAULTS: dict[str, dict[str, Any]] = {
     "Avg Transit Days": {"mode": "lower_better", "green": 5.0, "amber": 8.0},
     "Profit After Ads": {"mode": "higher_better", "green": 0.0, "amber": -500.0},
     "Profit After Fees": {"mode": "higher_better", "green": 0.0, "amber": -500.0},
+    "Payment net 30d": {"mode": "higher_better", "green": 0.0, "amber": -500.0},
 }
 
 
@@ -241,6 +273,9 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
     ad_spend_30 = _to_numeric(daily_recent.get("Ad_Spend", pd.Series(dtype=float))).sum()
     payouts_recent = _recent_window(bundle.payouts_fees_df, 30)
     payout_fees_30 = _to_numeric(payouts_recent.get("Fee_Amount", pd.Series(dtype=float))).sum()
+    payment_net_30 = 0.0
+    if not order_level_recent.empty and "Payment_Net" in order_level_recent.columns:
+        payment_net_30 = _to_numeric(order_level_recent.get("Payment_Net", pd.Series(dtype=float))).sum()
     orders_30 = _to_numeric(daily_recent.get("Orders_Total", pd.Series(dtype=float))).sum()
     delivered_30 = _to_numeric(daily_recent.get("Orders_Delivered", pd.Series(dtype=float))).sum()
     undelivered_now = 0.0
@@ -260,6 +295,11 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
         {"label": "Gross Profit 30d", "value": _fmt_money(gross_profit_30), "meta": "po supplier cost"},
         {"label": "Ad Spend 30d", "value": _fmt_money(ad_spend_30), "meta": "Meta daily spend"},
         {"label": "Payout Fees 30d", "value": _fmt_money(payout_fees_30), "meta": "Shopify payouts fees"},
+        {
+            "label": "Payment net 30d",
+            "value": _fmt_money(payment_net_30),
+            "meta": "Shopify Payments net po poplatkoch (ORDER_LEVEL)",
+        },
         {"label": "ROAS 30d", "value": _fmt_ratio(roas_30), "meta": "Revenue / Ad Spend"},
         {"label": "Orders 30d", "value": _fmt_int(orders_30), "meta": f"Delivered {_fmt_int(delivered_30)}"},
         {"label": "Undelivered", "value": _fmt_int(undelivered_now), "meta": "aktívne order-level"},
@@ -316,6 +356,7 @@ def recent_orders_table(bundle: DashboardBundle, limit: int = 30) -> pd.DataFram
         "Refund_Ratio_pct",
         "Refund_Bucket",
         "Net_Revenue_After_Refunds",
+        "Payment_Net",
         "Product_Cost",
         "Gross_Profit",
         "Gross_Profit_After_Refunds",

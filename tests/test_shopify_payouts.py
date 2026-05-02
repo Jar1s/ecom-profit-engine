@@ -6,7 +6,7 @@ import unittest
 
 import pandas as pd
 
-from shopify_payouts import payout_fees_monthly
+from shopify_payouts import payment_net_by_order_id, payout_fees_monthly
 
 
 class TestShopifyPayouts(unittest.TestCase):
@@ -24,6 +24,18 @@ class TestShopifyPayouts(unittest.TestCase):
         feb = out[out["Month"] == "2026-02"].iloc[0]
         self.assertEqual(jan["Payout_Fees_Total"], 4.0)
         self.assertEqual(feb["Payout_Fees_Total"], 3.0)
+
+    def test_payment_net_by_order_id_sums_net_per_order(self) -> None:
+        rows = [
+            {"Source_Order_ID": "1001", "Net_Amount": 48.5},
+            {"Source_Order_ID": "1001", "Net_Amount": -2.0},
+            {"Source_Order_ID": "1002", "Net_Amount": 10.0},
+            {"Source_Order_ID": "", "Net_Amount": 99.0},
+        ]
+        out = payment_net_by_order_id(rows)
+        self.assertEqual(out[1001], 46.5)
+        self.assertEqual(out[1002], 10.0)
+        self.assertNotIn(0, out)
 
 
 if __name__ == "__main__":

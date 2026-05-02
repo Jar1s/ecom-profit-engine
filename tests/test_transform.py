@@ -196,6 +196,39 @@ class TestTransform(unittest.TestCase):
         self.assertEqual(out.loc[0, "Gross_Profit"], 9.0)
         self.assertEqual(out.loc[0, "Gross_Profit_After_Refunds"], 1.5)
 
+    def test_order_level_summary_payment_net_max_per_order(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-04-01",
+                    "Order": "#1",
+                    "Order_ID": 1,
+                    "Line_Item_ID": 1,
+                    "Product": "A",
+                    "Quantity": 1,
+                    "Revenue": 10.0,
+                    "Product_Cost": 4.0,
+                    "Gross_Profit": 6.0,
+                    "Payment_Net": 9.5,
+                },
+                {
+                    "Date": "2026-04-01",
+                    "Order": "#1",
+                    "Order_ID": 1,
+                    "Line_Item_ID": 2,
+                    "Product": "B",
+                    "Quantity": 1,
+                    "Revenue": 5.0,
+                    "Product_Cost": 2.0,
+                    "Gross_Profit": 3.0,
+                    "Payment_Net": 9.5,
+                },
+            ]
+        )
+        out = order_level_summary(df)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out.loc[0, "Payment_Net"], 9.5)
+
     def test_order_level_summary_with_shipping_columns(self) -> None:
         df = pd.DataFrame(
             [

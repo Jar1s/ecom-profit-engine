@@ -7,6 +7,7 @@ import os
 import random
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from typing import TypeVar
 
 import gspread
@@ -174,28 +175,14 @@ def get_or_create_supplier_costs_worksheet(
         return ws
 
 
-def try_read_worksheet_dataframe(
-    settings: Settings,
+def worksheet_values_to_dataframe(
+    values: list[list[str]],
     worksheet_title: str,
     *,
     required_headers: list[str] | tuple[str, ...] | None = None,
 ) -> pd.DataFrame | None:
-    """Read a tab as DataFrame, or None if missing / empty / error (non-fatal)."""
-    title = (worksheet_title or "").strip()
-    if not title:
-        return None
-    try:
-        client = _authorize(settings)
-        sh = _open_spreadsheet(client, settings)
-        ws = _retry_sheet_api(lambda: sh.worksheet(title), what="worksheet")
-    except Exception as exc:
-        logger.debug("Worksheet %r not available: %s", title, exc)
-        return None
-    try:
-        values = _retry_sheet_api(lambda: ws.get_all_values(), what="read")
-    except Exception as exc:
-        logger.warning("Could not read worksheet %r: %s", title, exc)
-        return None
+    """Turn raw A1 grid from Sheets into a DataFrame (same rules as try_read_worksheet_dataframe)."""
+    title = worksheet_title
     if not values or len(values) < 2:
         return None
     header_row_idx = 0
@@ -218,6 +205,79 @@ def try_read_worksheet_dataframe(
     header = [str(c).strip() for c in values[header_row_idx]]
     rows = values[header_row_idx + 1 :]
     return pd.DataFrame(rows, columns=header)
+
+
+def try_read_worksheet_dataframe(
+    settings: Settings,
+    worksheet_title: str,
+    *,
+    required_headers: list[str] | tuple[str, ...] | None = None,
+) -> pd.DataFrame | None:
+    """Read a tab as DataFrame, or None if missing / empty / error (non-fatal)."""
+    title = (worksheet_title or "").strip()
+    if not title:
+        return None
+    try:
+        client = _authorize(settings)
+        sh = _open_spreadsheet(client, settings)
+        ws = _retry_sheet_api(lambda: sh.worksheet(title), what="worksheet")
+    except Exception as exc:
+        logger.debug("Worksheet %r not available: %s", title, exc)
+        return None
+    try:
+        values = _retry_sheet_api(lambda: ws.get_all_values(), what="read")
+    except Exception as exc:
+        logger.warning("Could not read worksheet %r: %s", title, exc)
+        return None
+    return worksheet_values_to_dataframe(values, title, required_headers=required_headers)
+
+
+def read_dashboard_sheet_tabs(
+    settings: Settings,
+    specs: list[tuple[str, tuple[str, ...] | None]],
+) -> list[pd.DataFrame]:
+    """
+    Read several tabs with one OAuth + spreadsheet open, then parallel get_all_values.
+    Much faster than calling try_read_worksheet_dataframe once per tab (repeated open_by_key).
+    """
+    out: list[pd.DataFrame] = [pd.DataFrame() for _ in specs]
+    jobs: list[tuple[int, str, tuple[str, ...] | None]] = []
+    for i, (tab, req) in enumerate(specs):
+        t = (tab or "").strip()
+        if t:
+            jobs.append((i, t, req))
+    if not jobs:
+        return out
+
+    client = _authorize(settings)
+    sh = _open_spreadsheet(client, settings)
+    max_workers = max(
+        1,
+        min(
+            len(jobs),
+            int(os.getenv("DASHBOARD_SHEET_READ_CONCURRENCY", "10")),
+            16,
+        ),
+    )
+
+    def _read_job(job: tuple[int, str, tuple[str, ...] | None]) -> tuple[int, pd.DataFrame]:
+        idx, title, req = job
+        try:
+            ws = _retry_sheet_api(lambda: sh.worksheet(title), what="worksheet")
+            values = _retry_sheet_api(lambda: ws.get_all_values(), what="read")
+        except Exception as exc:
+            logger.debug("Worksheet %r not available: %s", title, exc)
+            return idx, pd.DataFrame()
+        df = worksheet_values_to_dataframe(values, title, required_headers=req)
+        if df is None:
+            return idx, pd.DataFrame()
+        return idx, df.copy()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        results = list(ex.map(_read_job, jobs))
+    for idx, df in results:
+        out[idx] = df
+    return out
 
 
 def dataframe_to_values(df: pd.DataFrame) -> list[list[object]]:

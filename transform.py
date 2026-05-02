@@ -100,6 +100,7 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.Dat
                 "Refund_Bucket",
                 "Product_Cost",
                 "Gross_Profit",
+                "Payment_Net",
             ]
         )
 
@@ -151,6 +152,7 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
                 "Product_Cost",
                 "Gross_Profit",
                 "Gross_Profit_After_Refunds",
+                "Payment_Net",
             ]
         )
     agg: dict[str, Any] = {
@@ -166,6 +168,8 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         agg["Refund_Ratio_pct"] = ("Refund_Ratio_pct", "max")
     if "Refund_Bucket" in df.columns:
         agg["Refund_Bucket"] = ("Refund_Bucket", "first")
+    if "Payment_Net" in df.columns:
+        agg["Payment_Net"] = ("Payment_Net", "max")
     for col in (
         "Fulfillment_Status",
         "Shipment_Status",
@@ -214,6 +218,7 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         "Refund_Ratio_pct",
         "Refund_Bucket",
         "Net_Revenue_After_Refunds",
+        "Payment_Net",
         "Product_Cost",
         "Gross_Profit",
         "Gross_Profit_After_Refunds",
@@ -383,6 +388,7 @@ def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.Data
         ("Revenue", "Revenue_USD"),
         ("Product_Cost", "Product_Cost_USD"),
         ("Gross_Profit", "Gross_Profit_USD"),
+        ("Payment_Net", "Payment_Net_USD"),
         ("Ad_Spend", "Ad_Spend_USD"),
         ("Purchase_Value", "Purchase_Value_USD"),
     ]

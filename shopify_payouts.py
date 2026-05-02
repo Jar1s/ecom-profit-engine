@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import defaultdict
 from typing import Any
 
 import pandas as pd
@@ -126,6 +127,28 @@ def payout_fee_rows(settings: Settings) -> list[dict[str, Any]]:
             )
     logger.info("Shopify payouts: %s payouts -> %s payout transaction rows", len(payouts), len(rows))
     return rows
+
+
+def payment_net_by_order_id(payout_rows: list[dict[str, Any]]) -> dict[int, float]:
+    """
+    Sum ``Net_Amount`` from payout ledger rows per Shopify order id (``Source_Order_ID``).
+    Captures, refunds, and multiple payout lines aggregate into one total per order.
+    """
+    acc: defaultdict[int, float] = defaultdict(float)
+    for row in payout_rows:
+        if not isinstance(row, dict):
+            continue
+        raw = str(row.get("Source_Order_ID") or "").strip()
+        if not raw:
+            continue
+        try:
+            oid = int(float(raw))
+        except (TypeError, ValueError):
+            continue
+        if oid <= 0:
+            continue
+        acc[oid] += _f(row.get("Net_Amount"))
+    return {k: round(v, 2) for k, v in acc.items()}
 
 
 def payout_fees_monthly(payouts_df: pd.DataFrame) -> pd.DataFrame:

@@ -21,6 +21,10 @@ class TestPaymentNetEstimate(unittest.TestCase):
         self.assertEqual(classify_payment_bucket("paypal"), "paypal")
         self.assertEqual(classify_payment_bucket("Shopify Payments"), "shopify_payments")
         self.assertEqual(classify_payment_bucket("bogus"), "other")
+        self.assertEqual(classify_payment_bucket("credit_card"), "shopify_payments")
+        self.assertEqual(classify_payment_bucket("shop_pay"), "shopify_payments")
+        self.assertEqual(classify_payment_bucket("shopify"), "shopify_payments")
+        self.assertEqual(classify_payment_bucket("Apple Pay (via Shopify Payments)"), "shopify_payments")
 
     def test_estimate_net_from_revenue(self) -> None:
         fees = {
@@ -96,6 +100,43 @@ class TestPaymentNetEstimate(unittest.TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out.loc[0, "Payment_Net_Estimate"], 9.0)
         self.assertEqual(out.loc[0, "Payment_Gateway_Names"], "paypal")
+
+    def test_order_level_prefers_nonempty_gateway(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-04-01",
+                    "Order": "#1",
+                    "Order_ID": 1,
+                    "Line_Item_ID": 1,
+                    "Product": "A",
+                    "Quantity": 1,
+                    "Revenue": 10.0,
+                    "Product_Cost": 4.0,
+                    "Gross_Profit": 6.0,
+                    "Payment_Gateway_Names": "",
+                    "Payment_Net": 0.0,
+                    "Payment_Net_Estimate": 9.0,
+                },
+                {
+                    "Date": "2026-04-01",
+                    "Order": "#1",
+                    "Order_ID": 1,
+                    "Line_Item_ID": 2,
+                    "Product": "B",
+                    "Quantity": 1,
+                    "Revenue": 5.0,
+                    "Product_Cost": 2.0,
+                    "Gross_Profit": 3.0,
+                    "Payment_Gateway_Names": "shopify_payments",
+                    "Payment_Net": 0.0,
+                    "Payment_Net_Estimate": 4.0,
+                },
+            ]
+        )
+        out = order_level_summary(df)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out.loc[0, "Payment_Gateway_Names"], "shopify_payments")
 
 
 if __name__ == "__main__":

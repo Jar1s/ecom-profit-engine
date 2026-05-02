@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 _DELIVERED_WORD_RE = re.compile(r"\bdelivered\b", re.IGNORECASE)
 
 
+def _first_nonempty_gateway(series: pd.Series) -> str:
+    """Prefer any non-blank gateway when aggregating line items → order (``first`` can pick an empty)."""
+    for v in series:
+        t = str(v or "").strip()
+        if t:
+            return t
+    return ""
+
+
 def _is_delivered_row(row: pd.Series) -> bool:
     """Delivery detection for summary counts (Shopify + carrier fallback)."""
     delivery_status = str(row.get("Delivery_Status") or "").strip().lower()
@@ -179,7 +188,7 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
     if "Payment_Net" in df.columns:
         agg["Payment_Net"] = ("Payment_Net", "max")
     if "Payment_Gateway_Names" in df.columns:
-        agg["Payment_Gateway_Names"] = ("Payment_Gateway_Names", "first")
+        agg["Payment_Gateway_Names"] = ("Payment_Gateway_Names", _first_nonempty_gateway)
     if "Payment_Net_Estimate" in df.columns:
         agg["Payment_Net_Estimate"] = ("Payment_Net_Estimate", "max")
     for col in (

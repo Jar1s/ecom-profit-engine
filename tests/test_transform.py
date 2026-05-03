@@ -37,7 +37,7 @@ class TestTransform(unittest.TestCase):
         out = reorder_orders_db_columns(df)
         self.assertEqual(
             list(out.columns),
-            ["Date", "Revenue", "Revenue_USD", "Shipped_Date", "SKU", "Future_Column_X"],
+            ["Date", "Revenue_USD", "Revenue", "Shipped_Date", "SKU", "Future_Column_X"],
         )
 
     def test_enrich_line_items(self) -> None:

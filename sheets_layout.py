@@ -7,6 +7,7 @@ from typing import Any, Literal
 import pandas as pd
 
 from config import Settings
+from normalize import sheet_date_to_iso
 
 SheetKind = Literal["orders", "order_level", "meta", "meta_campaigns", "daily", "bookkeeping", "payouts"]
 
@@ -30,12 +31,17 @@ def _pad(width: int, row: list[Any]) -> list[Any]:
 
 
 def _df_to_value_rows(df: pd.DataFrame, width: int) -> list[list[Any]]:
+    _date_cols = {"Date", "Shipped_Date"}
+    cols = list(df.columns)
     rows: list[list[Any]] = []
     for _, row in df.iterrows():
         out: list[Any] = []
-        for v in row.tolist():
+        for c in cols:
+            v = row[c]
             if pd.isna(v):
                 out.append("")
+            elif c in _date_cols:
+                out.append(sheet_date_to_iso(v))
             else:
                 out.append(v)
         rows.append(_pad(width, out))

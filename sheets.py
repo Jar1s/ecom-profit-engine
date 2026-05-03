@@ -308,9 +308,15 @@ def read_dashboard_sheet_tabs(
 
 def dataframe_to_values(df: pd.DataFrame) -> list[list[object]]:
     """2D list for gspread; NaN -> empty string."""
+    from normalize import sheet_date_to_iso
+
+    _date_cols = {"Date", "Shipped_Date"}
     filled = df.copy()
     for col in filled.columns:
-        filled[col] = filled[col].apply(lambda x: "" if pd.isna(x) else x)
+        if col in _date_cols:
+            filled[col] = filled[col].map(lambda x: "" if pd.isna(x) else sheet_date_to_iso(x))
+        else:
+            filled[col] = filled[col].apply(lambda x: "" if pd.isna(x) else x)
     header = filled.columns.tolist()
     rows = filled.values.tolist()
     return [header] + rows

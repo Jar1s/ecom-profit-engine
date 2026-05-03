@@ -18,6 +18,7 @@ from config import Settings, load_settings
 from costs import load_cost_maps
 from data_quality import build_missing_supplier_costs_report, log_missing_supplier_costs
 from meta_ads import fetch_meta_campaign_insights, fetch_meta_daily_spend
+from normalize import sheet_date_to_iso
 from payment_net_estimate import apply_payment_net_estimate
 from pipeline_state import PipelineState, load_pipeline_state, save_pipeline_state, utc_now_iso
 from sheets import (
@@ -324,8 +325,9 @@ def _load_orders_db_df(settings: Settings) -> pd.DataFrame:
         out["Line_Item_ID"] = out["Line_Item_ID"].astype("Int64")
     if "Quantity" in out.columns:
         out["Quantity"] = out["Quantity"].astype(float)
-    if "Date" in out.columns:
-        out["Date"] = out["Date"].astype(str)
+    for _dcol in ("Date", "Shipped_Date"):
+        if _dcol in out.columns:
+            out[_dcol] = out[_dcol].map(sheet_date_to_iso)
     return out
 
 

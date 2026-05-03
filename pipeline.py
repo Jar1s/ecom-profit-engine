@@ -335,7 +335,18 @@ def _merge_orders_df(existing: pd.DataFrame, changed: pd.DataFrame) -> pd.DataFr
     return out
 
 
+def _drop_duplicate_columns(df: pd.DataFrame, *, label: str) -> pd.DataFrame:
+    """Keep first occurrence of duplicate Sheet headers so pandas concat can align columns."""
+    if df.empty or df.columns.is_unique:
+        return df
+    dupes = [str(c) for c in df.columns[df.columns.duplicated()].tolist()]
+    logger.warning("%s: dropping duplicate columns from Sheet data: %s", label, dupes)
+    return df.loc[:, ~df.columns.duplicated()].copy()
+
+
 def _merge_meta_df(existing: pd.DataFrame, fresh: pd.DataFrame) -> pd.DataFrame:
+    existing = _drop_duplicate_columns(existing, label="META_DATA existing")
+    fresh = _drop_duplicate_columns(fresh, label="META_DATA fresh")
     if existing.empty:
         return fresh.copy()
     if fresh.empty:

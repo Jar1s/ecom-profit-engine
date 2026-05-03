@@ -10,6 +10,7 @@ import pandas as pd
 from pipeline import (
     _load_meta_df,
     _load_orders_db_df,
+    _merge_meta_df,
     _merge_meta_rows_with_existing,
     _tracking_candidate_order_ids,
     _updated_at_min_from_state,
@@ -121,3 +122,13 @@ class PipelineSheetLoadTests(TestCase):
         self.assertEqual(by_date["2026-01-01"], 5.0)
         self.assertEqual(by_date["2026-04-30"], 12.5)
         self.assertEqual(by_date["2026-05-01"], 7.0)
+
+    def test_merge_meta_df_drops_duplicate_sheet_headers(self) -> None:
+        existing = pd.DataFrame(
+            [["2026-04-30", "10.00", "duplicate"]],
+            columns=["Date", "Ad_Spend_USD", "Ad_Spend_USD"],
+        )
+        fresh = pd.DataFrame([{"Date": "2026-05-01", "Ad_Spend_USD": 7.0}])
+        out = _merge_meta_df(existing, fresh)
+        self.assertEqual(list(out.columns), ["Date", "Ad_Spend_USD"])
+        self.assertEqual(len(out), 2)

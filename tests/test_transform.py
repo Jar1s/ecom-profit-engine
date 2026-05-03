@@ -16,6 +16,7 @@ from transform import (
     merge_daily_with_meta,
     meta_rows_for_daily_merge,
     order_level_summary,
+    reorder_order_level_columns,
     reorder_orders_db_columns,
 )
 
@@ -256,6 +257,38 @@ class TestTransform(unittest.TestCase):
         self.assertEqual(out.loc[0, "Product_Cost"], 6.0)
         self.assertEqual(out.loc[0, "Gross_Profit"], 9.0)
         self.assertEqual(out.loc[0, "Gross_Profit_After_Refunds"], 1.5)
+
+    def test_reorder_order_level_columns_puts_usd_before_revenue(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "Date": "2026-04-01",
+                    "Order": "#1",
+                    "Order_ID": 1,
+                    "Revenue": 100.0,
+                    "Product_Cost": 40.0,
+                    "Gross_Profit": 60.0,
+                    "Revenue_USD": 65.0,
+                    "Gross_Profit_USD": 39.0,
+                    "Future_Column_X": "x",
+                }
+            ]
+        )
+        out = reorder_order_level_columns(df)
+        self.assertEqual(
+            list(out.columns),
+            [
+                "Date",
+                "Order",
+                "Order_ID",
+                "Revenue_USD",
+                "Revenue",
+                "Product_Cost",
+                "Gross_Profit_USD",
+                "Gross_Profit",
+                "Future_Column_X",
+            ],
+        )
 
     def test_order_level_summary_payment_net_sums_line_shares(self) -> None:
         df = pd.DataFrame(

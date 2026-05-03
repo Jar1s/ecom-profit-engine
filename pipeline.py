@@ -40,6 +40,7 @@ from transform import (
     merge_daily_with_meta,
     meta_rows_for_daily_merge,
     order_level_summary,
+    reorder_order_level_columns,
     reorder_orders_db_columns,
 )
 
@@ -651,7 +652,9 @@ def _build_artifacts(
     orders_df = reorder_orders_db_columns(orders_df)
     order_df = _timed(
         "order_level",
-        lambda: enrich_usd_columns(order_level_summary(orders_df), settings.usd_per_local),
+        lambda: reorder_order_level_columns(
+            enrich_usd_columns(order_level_summary(orders_df), settings.usd_per_local)
+        ),
     )
     daily_df = _timed("daily", lambda: daily_summary_from_orders(orders_df))
     meta_campaign_df = pd.DataFrame()

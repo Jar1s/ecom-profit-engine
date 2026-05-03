@@ -140,6 +140,32 @@ ORDERS_DB_PREFERRED_COLUMN_ORDER: tuple[str, ...] = (
 ORDERS_DB_EMPTY_COLUMNS = [c for c in ORDERS_DB_PREFERRED_COLUMN_ORDER if not c.endswith("_USD")]
 
 
+ORDER_LEVEL_PREFERRED_COLUMN_ORDER: tuple[str, ...] = (
+    "Date",
+    "Order",
+    "Order_ID",
+    "Fulfillment_Status",
+    "Shipment_Status",
+    "Delivery_Status",
+    "Tracking_Numbers",
+    "Tracking_Companies",
+    "Carrier_Tracking_Status",
+    "Shipped_Date",
+    "Days_In_Transit",
+    "Revenue_USD",
+    "Revenue",
+    "Product_Cost",
+    "Gross_Profit_USD",
+    "Gross_Profit",
+    "Refunds_Total",
+    "Net_Revenue_After_Refunds",
+    "Gross_Profit_After_Refunds",
+    "Payment_Gateway_Names",
+    "Payment_Net",
+    "Payment_Net_Estimate",
+)
+
+
 def reorder_orders_db_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
     Reorder ORDERS_DB columns for Sheets: related fields adjacent (not arbitrary dict/concat order).
@@ -149,6 +175,16 @@ def reorder_orders_db_columns(df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = df.drop(columns=["Refund_Ratio_pct", "Product_Cost_USD"], errors="ignore")
     preferred = [c for c in ORDERS_DB_PREFERRED_COLUMN_ORDER if c in df.columns]
+    seen = set(preferred)
+    rest = [c for c in df.columns if c not in seen]
+    return df[preferred + rest].copy()
+
+
+def reorder_order_level_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Reorder ORDER_LEVEL columns so USD mirror amounts sit directly before shop-currency columns."""
+    if df.empty:
+        return df
+    preferred = [c for c in ORDER_LEVEL_PREFERRED_COLUMN_ORDER if c in df.columns]
     seen = set(preferred)
     rest = [c for c in df.columns if c not in seen]
     return df[preferred + rest].copy()

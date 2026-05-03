@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import logging
 import re
 from typing import Any
@@ -48,26 +49,42 @@ def _line_unit_cost(
     *,
     order_counts: dict[str, int],
     lineage_map: dict[str, float],
+    match_counts: Counter[str] | None = None,
 ) -> float:
     """
-    Prefer **SKU** (exact + prefix rules) before product-title lineage.
+    Prefer an exact product-title cost, then **SKU** (exact + prefix rules), then
+    broader product-title lineage.
 
-    Supplier sheets often key on SKU while Shopify variant titles differ; matching
-    title first could hit a broader ``Product`` row and skip the correct SKU price.
+    This keeps manually curated Product rows authoritative while still allowing SKU
+    to fix cases where Shopify variant titles differ from supplier titles. Broader
+    stripped-title fallbacks stay below SKU because they can match nearby variants.
     """
     k = row["Product_Normalized"]
+    exact_product_cost = cost_maps.by_product.get(k)
+    if exact_product_cost is not None and exact_product_cost > 0:
+        if match_counts is not None:
+            match_counts["exact_product"] += 1
+        return float(exact_product_cost)
+
     sku_raw = str(row.get("SKU") or "").strip()
     sk = normalize_sku(sku_raw)
     if sk:
         uc = cost_maps.by_sku.get(sk)
         if uc is not None and float(uc) > 0:
+            if match_counts is not None:
+                match_counts["sku"] += 1
             return float(uc)
         for prefix, cost in cost_maps.sku_prefix_rules:
             if sk.startswith(prefix) and float(cost) > 0:
+                if match_counts is not None:
+                    match_counts["sku_prefix"] += 1
                 return float(cost)
-    for cand in product_title_family_levels(k):
+
+    for cand in product_title_family_levels(k)[1:]:
         pl = lineage_map.get(cand)
         if pl is not None and pl > 0:
+            if match_counts is not None:
+                match_counts["product_lineage"] += 1
             return float(pl)
     ord_name = str(row.get("Order") or "").strip()
     if ord_name and order_counts.get(ord_name, 0) == 1:
@@ -75,12 +92,20 @@ def _line_unit_cost(
         if on:
             uo = cost_maps.by_order_single.get(on)
             if uo is not None and uo > 0:
+                if match_counts is not None:
+                    match_counts["order_single"] += 1
                 return float(uo)
     lc = cost_maps.learned_by_product_sku
     if (k, sk) in lc:
+        if match_counts is not None:
+            match_counts["learned_product_sku"] += 1
         return float(lc[(k, sk)])
     if (k, "") in lc:
+        if match_counts is not None:
+            match_counts["learned_product"] += 1
         return float(lc[(k, "")])
+    if match_counts is not None:
+        match_counts["missing"] += 1
     return 0.0
 
 
@@ -131,9 +156,9 @@ def reorder_orders_db_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.DataFrame:
     """
-    Unit cost resolution order: presné SKU a ITEM_CATALOG prefix → názov produktu
-    (vrátane „rovnaký model, iná farba“ cez odseknuté `` - …``) → jednopoložková objednávka
-    (BillDetail) → learned ORDERS_DB.
+    Unit cost resolution order: presný názov produktu → presné SKU a ITEM_CATALOG prefix
+    → širší názov produktu (rovnaký model, iná farba cez odseknuté `` - …``)
+    → jednopoložková objednávka (BillDetail) → learned ORDERS_DB.
     """
     df = pd.DataFrame(rows)
     if df.empty:
@@ -146,15 +171,42 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.Dat
     lineage_map = cost_maps.by_product_lineage
     if not lineage_map and cost_maps.by_product:
         lineage_map = build_product_lineage_index(cost_maps.by_product)
+    match_counts: Counter[str] = Counter()
     unit_cost = df.apply(
         lambda r: _line_unit_cost(
             r,
             cost_maps,
             order_counts=order_counts,
             lineage_map=lineage_map,
+            match_counts=match_counts,
         ),
         axis=1,
     ).astype(float)
+    if len(df):
+        logger.info(
+            "cost_match_summary total=%s exact_product=%s sku=%s sku_prefix=%s product_lineage=%s order_single=%s learned_product_sku=%s learned_product=%s missing=%s",
+            len(df),
+            match_counts["exact_product"],
+            match_counts["sku"],
+            match_counts["sku_prefix"],
+            match_counts["product_lineage"],
+            match_counts["order_single"],
+            match_counts["learned_product_sku"],
+            match_counts["learned_product"],
+            match_counts["missing"],
+        )
+        if match_counts["missing"]:
+            missing_samples = (
+                df.loc[unit_cost <= 0, ["Product", "SKU"]]
+                .drop_duplicates()
+                .head(10)
+                .to_dict("records")
+            )
+            logger.warning(
+                "cost_match_missing_samples count=%s samples=%s",
+                match_counts["missing"],
+                missing_samples,
+            )
     qty = df["Quantity"].astype(float) if "Quantity" in df.columns else pd.Series(1.0, index=df.index)
     df["Product_Cost"] = (unit_cost * qty).round(2)
     df["Gross_Profit"] = (df["Revenue"].astype(float) - df["Product_Cost"]).round(2)

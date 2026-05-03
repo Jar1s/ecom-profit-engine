@@ -85,6 +85,7 @@ class PipelineSheetLoadTests(TestCase):
                     "Order": "#1001",
                     "Order_ID": "1001",
                     "Line_Item_ID": "2001",
+                    "Product": "Widget",
                     "Quantity": "1",
                     "Revenue": "19.99",
                     "Product_Cost": "9.5",
@@ -95,9 +96,28 @@ class PipelineSheetLoadTests(TestCase):
         )
         with patch("pipeline.try_read_worksheet_dataframe", return_value=raw) as read_df:
             out = _load_orders_db_df(settings)  # type: ignore[arg-type]
-        self.assertEqual(read_df.call_args.kwargs["required_headers"], ("Order_ID", "Line_Item_ID"))
+        self.assertEqual(read_df.call_args.kwargs["required_headers"], ("Date", "Order_ID", "Line_Item_ID"))
         self.assertEqual(out["Order_ID"].iloc[0], 1001)
         self.assertEqual(out["Line_Item_ID"].iloc[0], 2001)
+
+    def test_load_orders_db_requires_date_for_reporting_reuse(self) -> None:
+        settings = SimpleNamespace()
+        raw = pd.DataFrame(
+            [
+                {
+                    "Order": "#1001",
+                    "Order_ID": "1001",
+                    "Line_Item_ID": "2001",
+                    "Product": "Widget",
+                    "Quantity": "1",
+                    "Revenue": "19.99",
+                }
+            ]
+        )
+        with patch("pipeline.try_read_worksheet_dataframe", return_value=raw):
+            out = _load_orders_db_df(settings)  # type: ignore[arg-type]
+        self.assertTrue(out.empty)
+        self.assertIn("Date", out.columns)
 
     def test_load_meta_df_finds_date_header_in_fancy_layout(self) -> None:
         settings = SimpleNamespace()

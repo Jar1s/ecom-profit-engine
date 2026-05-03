@@ -282,11 +282,16 @@ def _load_orders_db_df(settings: Settings) -> pd.DataFrame:
     df = try_read_worksheet_dataframe(
         settings,
         SHEET_ORDERS_DB,
-        required_headers=("Order_ID", "Line_Item_ID"),
+        required_headers=("Date", "Order_ID", "Line_Item_ID"),
     )
     if df is None or df.empty:
         return _empty_orders_df()
     out = df.copy()
+    required = {"Date", "Order", "Order_ID", "Line_Item_ID", "Product", "Quantity", "Revenue"}
+    missing = sorted(required - set(out.columns))
+    if missing:
+        logger.warning("ORDERS_DB missing required columns %s; forcing full rebuild", missing)
+        return _empty_orders_df()
     out = _coerce_numeric(
         out,
         ["Order_ID", "Line_Item_ID", "Quantity", "Revenue", "Product_Cost", "Gross_Profit", "Days_In_Transit"],

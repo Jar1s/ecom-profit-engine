@@ -364,7 +364,7 @@ def replace_worksheet_simple(
             c: list[list[object]] = chunk,
             rng: str = range_a1,
         ) -> None:
-            ws.update(c, rng, value_input_option="USER_ENTERED")
+            ws.update(c, rng, value_input_option="RAW")
 
         _retry_sheet_write(_write_chunk, what="update")
         _inter_chunk_pause()
@@ -475,7 +475,9 @@ def upload_dataframe(
             c: list[list[object]] = chunk,
             rng: str = range_a1,
         ) -> None:
-            ws.update(c, rng, value_input_option="USER_ENTERED")
+            # RAW keeps ISO Date/Shipped_Date strings as text. With USER_ENTERED,
+            # Sheets parses them as dates; later TEXT formatting can display serials.
+            ws.update(c, rng, value_input_option="RAW")
 
         _retry_sheet_write(_write_chunk, what="update")
         _inter_chunk_pause()

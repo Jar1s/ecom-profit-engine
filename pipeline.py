@@ -724,7 +724,9 @@ def _run_full(settings: Settings, cost_maps) -> PipelineArtifacts:
     campaign_daily_rows = _meta_rows_from_campaign_rows(meta_campaign_rows)
     if campaign_daily_rows:
         logger.info("META_DATA daily spend source: META_CAMPAIGNS campaign daily sums")
-    meta_rows = _merge_meta_rows_with_existing(settings, campaign_daily_rows or meta_rows)
+        meta_rows = campaign_daily_rows
+    else:
+        meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
     return _build_artifacts(
         settings,
         cost_maps,
@@ -821,7 +823,9 @@ def _run_reporting(settings: Settings, cost_maps, state: PipelineState) -> Pipel
     campaign_daily_rows = _meta_rows_from_campaign_rows(meta_campaign_rows)
     if campaign_daily_rows:
         logger.info("META_DATA daily spend source: META_CAMPAIGNS campaign daily sums")
-    meta_rows = _merge_meta_rows_with_existing(settings, campaign_daily_rows or meta_rows)
+        meta_rows = campaign_daily_rows
+    else:
+        meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
     return _build_artifacts(
         settings,
         cost_maps,

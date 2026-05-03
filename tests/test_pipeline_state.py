@@ -143,6 +143,13 @@ class PipelineSheetLoadTests(TestCase):
         self.assertEqual(by_date["2026-04-30"], 12.5)
         self.assertEqual(by_date["2026-05-01"], 7.0)
 
+    def test_merge_meta_rows_keeps_existing_usd_amounts_as_api_currency(self) -> None:
+        settings = SimpleNamespace(usd_per_local=0.65, meta_spend_in_usd=True)
+        existing = pd.DataFrame([{"Date": "2026-01-01", "Ad_Spend_USD": "100.00"}])
+        with patch("pipeline._load_meta_df", return_value=existing):
+            rows = _merge_meta_rows_with_existing(settings, [])
+        self.assertEqual(rows, [{"Date": "2026-01-01", "Ad_Spend": 100.0}])
+
     def test_merge_meta_df_drops_duplicate_sheet_headers(self) -> None:
         existing = pd.DataFrame(
             [["2026-04-30", "10.00", "duplicate"]],

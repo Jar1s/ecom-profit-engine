@@ -370,8 +370,6 @@ def _meta_frame_to_rows(meta_df: pd.DataFrame, settings: Settings) -> list[dict[
         src = meta_df[["Date", "Ad_Spend"]].copy()
     elif "Ad_Spend_USD" in meta_df.columns:
         src = meta_df[["Date", "Ad_Spend_USD"]].rename(columns={"Ad_Spend_USD": "Ad_Spend"}).copy()
-        if settings.meta_spend_in_usd and settings.usd_per_local:
-            src["Ad_Spend"] = src["Ad_Spend"].astype(float) / float(settings.usd_per_local)
     else:
         return []
     src["Date"] = src["Date"].astype(str)

@@ -613,11 +613,7 @@ def _upload_reporting_tabs(settings: Settings, artifacts: PipelineArtifacts, *, 
         _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
         _timed(step, fn)
 
-    _run_step(
-        "sheet_meta_data",
-        lambda: upload_dataframe(settings, artifacts.meta_df, SHEET_META_DATA, layout_kind="meta"),
-        estimate=10.0,
-    )
+    _upload_core_tabs(settings, artifacts, started_total=started_total)
     pause_between_sheet_uploads()
     if not artifacts.meta_campaign_df.empty or settings.meta_campaign_insights:
         _run_step(

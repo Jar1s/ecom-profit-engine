@@ -130,7 +130,7 @@ def sheet_values_with_summary(
         n = len(df)
         rev = float(df["Revenue"].sum()) if "Revenue" in df.columns else 0.0
         cogs = float(df["Product_Cost"].sum()) if "Product_Cost" in df.columns else 0.0
-        gp = float(df["Gross_Profit"].sum()) if "Gross_Profit" in df.columns else 0.0
+        gp_usd = float(df["Gross_Profit_USD"].sum()) if "Gross_Profit_USD" in df.columns else 0.0
         summary.append(
             _pad(
                 width,
@@ -147,8 +147,8 @@ def sheet_values_with_summary(
                     round(rev, 2),
                     "Product_Cost",
                     round(cogs, 2),
-                    "Gross_Profit",
-                    round(gp, 2),
+                    "",
+                    "",
                 ],
             )
         )
@@ -162,7 +162,7 @@ def sheet_values_with_summary(
                         "Revenue_USD",
                         round(float(df["Revenue_USD"].sum()), 2),
                         "Gross_Profit_USD",
-                        round(float(df["Gross_Profit_USD"].sum()), 2),
+                        round(gp_usd, 2),
                         "",
                         "",
                     ],

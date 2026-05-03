@@ -223,6 +223,11 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
     return grouped
 
 
+def order_level_export_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Final ORDER_LEVEL sheet shape: keep only USD gross profit to avoid mixed-margin columns."""
+    return df.drop(columns=["Gross_Profit"], errors="ignore")
+
+
 def bookkeeping_monthly_from_daily(daily_df: pd.DataFrame) -> pd.DataFrame:
     """
     Monthly management P&L rollup for a **BOOKKEEPING** sheet (not statutory accounts).

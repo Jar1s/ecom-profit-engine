@@ -35,6 +35,7 @@ from transform import (
     enrich_usd_columns,
     merge_daily_with_meta,
     meta_rows_for_daily_merge,
+    order_level_export_columns,
     order_level_summary,
 )
 
@@ -468,7 +469,9 @@ def _build_artifacts(
     )
     order_df = _timed(
         "order_level",
-        lambda: enrich_usd_columns(order_level_summary(orders_df), settings.usd_per_local),
+        lambda: order_level_export_columns(
+            enrich_usd_columns(order_level_summary(orders_df), settings.usd_per_local)
+        ),
     )
     daily_df = _timed("daily", lambda: daily_summary_from_orders(orders_df))
     meta_df = _timed("meta_transform", lambda: _build_meta_df(meta_rows, settings))

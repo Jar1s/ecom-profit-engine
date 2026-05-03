@@ -15,6 +15,7 @@ from transform import (
     enrich_usd_columns,
     merge_daily_with_meta,
     meta_rows_for_daily_merge,
+    order_level_export_columns,
     order_level_summary,
 )
 
@@ -234,6 +235,21 @@ class TestTransform(unittest.TestCase):
         self.assertEqual(out.loc[0, "Shipment_Status"], "in_transit")
         self.assertEqual(out.loc[0, "Shipped_Date"], "2026-03-28")
         self.assertEqual(out.loc[0, "Days_In_Transit"], 4)
+
+    def test_order_level_export_drops_local_gross_profit(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "Revenue": 100.0,
+                    "Product_Cost": 40.0,
+                    "Gross_Profit": 60.0,
+                    "Gross_Profit_USD": 39.0,
+                }
+            ]
+        )
+        out = order_level_export_columns(df)
+        self.assertNotIn("Gross_Profit", out.columns)
+        self.assertEqual(out.loc[0, "Gross_Profit_USD"], 39.0)
 
     def test_merge_daily_with_meta_roas(self) -> None:
         daily = pd.DataFrame(

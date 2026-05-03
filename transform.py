@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import logging
 import re
 from typing import Any
@@ -39,20 +40,27 @@ def _line_unit_cost(
     *,
     order_counts: dict[str, int],
     lineage_map: dict[str, float],
+    match_counts: Counter[str] | None = None,
 ) -> float:
     k = row["Product_Normalized"]
     for cand in product_title_family_levels(k):
         pl = lineage_map.get(cand)
         if pl is not None and pl > 0:
+            if match_counts is not None:
+                match_counts["product"] += 1
             return float(pl)
     sku_raw = str(row.get("SKU") or "").strip()
     sk = normalize_sku(sku_raw)
     if sk:
         uc = cost_maps.by_sku.get(sk)
         if uc is not None:
+            if match_counts is not None:
+                match_counts["sku"] += 1
             return float(uc)
         for prefix, cost in cost_maps.sku_prefix_rules:
             if sk.startswith(prefix):
+                if match_counts is not None:
+                    match_counts["sku_prefix"] += 1
                 return float(cost)
     ord_name = str(row.get("Order") or "").strip()
     if ord_name and order_counts.get(ord_name, 0) == 1:
@@ -60,12 +68,20 @@ def _line_unit_cost(
         if on:
             uo = cost_maps.by_order_single.get(on)
             if uo is not None and uo > 0:
+                if match_counts is not None:
+                    match_counts["order_single"] += 1
                 return float(uo)
     lc = cost_maps.learned_by_product_sku
     if (k, sk) in lc:
+        if match_counts is not None:
+            match_counts["learned_product_sku"] += 1
         return float(lc[(k, sk)])
     if (k, "") in lc:
+        if match_counts is not None:
+            match_counts["learned_product"] += 1
         return float(lc[(k, "")])
+    if match_counts is not None:
+        match_counts["missing"] += 1
     return 0.0
 
 
@@ -106,15 +122,36 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.Dat
     lineage_map = cost_maps.by_product_lineage
     if not lineage_map and cost_maps.by_product:
         lineage_map = build_product_lineage_index(cost_maps.by_product)
+    match_counts: Counter[str] = Counter()
     unit_cost = df.apply(
         lambda r: _line_unit_cost(
             r,
             cost_maps,
             order_counts=order_counts,
             lineage_map=lineage_map,
+            match_counts=match_counts,
         ),
         axis=1,
     ).astype(float)
+    logger.info(
+        "cost_match_summary total=%s product=%s sku=%s sku_prefix=%s order_single=%s learned_product_sku=%s learned_product=%s missing=%s",
+        len(df),
+        match_counts["product"],
+        match_counts["sku"],
+        match_counts["sku_prefix"],
+        match_counts["order_single"],
+        match_counts["learned_product_sku"],
+        match_counts["learned_product"],
+        match_counts["missing"],
+    )
+    if match_counts["missing"]:
+        missing_samples = (
+            df.loc[unit_cost <= 0, ["Product", "SKU"]]
+            .drop_duplicates()
+            .head(10)
+            .to_dict("records")
+        )
+        logger.warning("cost_match_missing_samples count=%s samples=%s", match_counts["missing"], missing_samples)
     qty = df["Quantity"].astype(float) if "Quantity" in df.columns else pd.Series(1.0, index=df.index)
     df["Product_Cost"] = (unit_cost * qty).round(2)
     df["Gross_Profit"] = (df["Revenue"].astype(float) - df["Product_Cost"]).round(2)
@@ -334,13 +371,15 @@ def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.Data
     """
     Append *_USD columns by multiplying local currency columns by USD_PER_LOCAL_UNIT
     (how many USD for one unit of shop/report currency, e.g. 0.65 if 1 AUD ≈ 0.65 USD).
+
+    Product_Cost is already maintained in supplier/report USD, so do not create
+    Product_Cost_USD or convert it.
     """
     if not usd_per_local or usd_per_local <= 0:
         return df
     out = df.copy()
     pairs = [
         ("Revenue", "Revenue_USD"),
-        ("Product_Cost", "Product_Cost_USD"),
         ("Gross_Profit", "Gross_Profit_USD"),
         ("Ad_Spend", "Ad_Spend_USD"),
         ("Purchase_Value", "Purchase_Value_USD"),
@@ -355,15 +394,15 @@ def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.Data
 
 def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
     """
-    For DAILY_SUMMARY only: drop shop-currency columns and use ``*_USD`` as the main
-    columns (renamed to Revenue, Product_Cost, Gross_Profit, Ad_Spend). Recomputes
+    For DAILY_SUMMARY only: drop shop-currency columns and use revenue/profit/spend
+    ``*_USD`` columns as the main columns. ``Product_Cost`` is kept as-is because
+    supplier COGS is already maintained in USD/report basis. Recomputes
     ``Marketing_ROAS`` and adds ``Net_Profit`` = Gross_Profit − Ad_Spend (same basis as ROAS).
 
     No-op when ``USD_PER_LOCAL_UNIT`` was not applied (missing ``*_USD`` columns).
     """
     required = (
         "Revenue_USD",
-        "Product_Cost_USD",
         "Gross_Profit_USD",
         "Ad_Spend_USD",
     )
@@ -374,16 +413,16 @@ def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
         )
         return df
     out = df.copy()
-    for c in ("Revenue", "Product_Cost", "Gross_Profit", "Ad_Spend"):
+    for c in ("Revenue", "Gross_Profit", "Ad_Spend"):
         out = out.drop(columns=[c], errors="ignore")
     out = out.rename(
         columns={
             "Revenue_USD": "Revenue",
-            "Product_Cost_USD": "Product_Cost",
             "Gross_Profit_USD": "Gross_Profit",
             "Ad_Spend_USD": "Ad_Spend",
         }
     )
+    out = out.drop(columns=["Product_Cost_USD"], errors="ignore")
 
     def roas(row: pd.Series) -> float | None:
         spend = row.get("Ad_Spend")

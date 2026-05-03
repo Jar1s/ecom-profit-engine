@@ -101,10 +101,10 @@ def sheet_values_with_summary(
                         "",
                         "Revenue_USD",
                         round(float(df["Revenue_USD"].sum()), 2),
-                        "Product_Cost_USD",
-                        round(float(df["Product_Cost_USD"].sum()), 2),
                         "Gross_Profit_USD",
                         round(float(df["Gross_Profit_USD"].sum()), 2),
+                        "",
+                        "",
                     ],
                 )
             )
@@ -161,10 +161,10 @@ def sheet_values_with_summary(
                         "",
                         "Revenue_USD",
                         round(float(df["Revenue_USD"].sum()), 2),
-                        "Product_Cost_USD",
-                        round(float(df["Product_Cost_USD"].sum()), 2),
                         "Gross_Profit_USD",
                         round(float(df["Gross_Profit_USD"].sum()), 2),
+                        "",
+                        "",
                     ],
                 )
             )

@@ -7,6 +7,9 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
+# Columns written/read as calendar YYYY-MM-DD (never leave raw Sheets serials in cells).
+SHEET_DATE_COLUMN_NAMES: frozenset[str] = frozenset(("Date", "Shipped_Date"))
+
 _MULTI_SPACE = re.compile(r"\s+")
 
 
@@ -113,9 +116,14 @@ def sheet_date_to_iso(value: Any) -> str:
         return s[:10].replace("/", "-")
     try:
         xf = float(s)
-        if 40000 <= xf <= 55000:
+        if math.isnan(xf):
+            return ""
+        if abs(xf) < 1e-9:
+            return ""
+        # Google Sheets / Excel day serials (roughly 1954–2078); wider than before for old ships.
+        if 20000 <= xf <= 65000:
             base = date(1899, 12, 30)
             return (base + timedelta(days=int(round(xf)))).isoformat()
     except ValueError:
         pass
-    return s[:10] if len(s) >= 10 else s
+    return s[:10] if len(s) >= 10 else ""

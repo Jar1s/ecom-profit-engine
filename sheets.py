@@ -21,6 +21,7 @@ from sheets_formatting import (
     apply_center_alignment,
     apply_data_column_widths,
     apply_data_conditional_formatting,
+    apply_data_number_formats,
     apply_summary_dashboard_format,
 )
 
@@ -415,6 +416,16 @@ def upload_dataframe(
 
     _retry_sheet_write(
         lambda: apply_center_alignment(ws, num_rows=len(values), num_cols=num_cols),
+        what="format",
+    )
+
+    _retry_sheet_write(
+        lambda: apply_data_number_formats(
+            ws,
+            header_row_1based=header_row,
+            num_sheet_rows=len(values),
+            columns=list(df.columns),
+        ),
         what="format",
     )
 

@@ -234,6 +234,60 @@ def _col_index(columns: list[str], name: str) -> int | None:
         return None
 
 
+_TWO_DECIMAL_COLUMNS: frozenset[str] = frozenset(
+    {
+        "Revenue",
+        "Revenue_USD",
+        "Product_Cost",
+        "Gross_Profit",
+        "Gross_Profit_USD",
+        "Ad_Spend",
+        "Ad_Spend_USD",
+        "Purchase_Value",
+        "Purchase_Value_USD",
+        "Marketing_ROAS",
+        "Net_Profit",
+        "Sales_Revenue",
+        "COGS",
+        "Marketing_Spend",
+        "Gross_profit",
+        "Operating_income",
+        "Sales_Tax_Collected",
+        "Refunds",
+        "Net_Sales",
+        "Shipping_Charged",
+        "Discounts",
+        "Subtotal",
+        "GMV",
+    }
+)
+
+_INTEGER_COLUMNS: frozenset[str] = frozenset(
+    {
+        "Order_ID",
+        "Line_Item_ID",
+        "Quantity",
+        "Days_In_Transit",
+        "Orders_Total",
+        "Orders_Delivered",
+        "Orders_Undelivered",
+        "Impressions",
+        "Clicks",
+        "Adds_to_Cart",
+        "Checkouts_Initiated",
+        "Purchases",
+    }
+)
+
+
+def _number_format_for_column(name: str) -> dict[str, str] | None:
+    if name in _TWO_DECIMAL_COLUMNS:
+        return {"type": "NUMBER", "pattern": "#,##0.00"}
+    if name in _INTEGER_COLUMNS:
+        return {"type": "NUMBER", "pattern": "0"}
+    return None
+
+
 def _grid(
     sheet_id: int,
     *,
@@ -449,6 +503,44 @@ def apply_data_conditional_formatting(
         ws.spreadsheet.batch_update({"requests": requests})
     except Exception as exc:
         logger.warning("Conditional formatting failed: %s", exc)
+
+
+def apply_data_number_formats(
+    ws: gspread.Worksheet,
+    *,
+    header_row_1based: int,
+    num_sheet_rows: int,
+    columns: list[str],
+) -> None:
+    """Force stable numeric display: money/metriky with exactly 2 decimals, counts as integers."""
+    if not columns or header_row_1based >= num_sheet_rows:
+        return
+    requests: list[dict[str, Any]] = []
+    for idx, name in enumerate(columns):
+        fmt = _number_format_for_column(name)
+        if fmt is None:
+            continue
+        requests.append(
+            {
+                "repeatCell": {
+                    "range": _grid(
+                        ws.id,
+                        r0=header_row_1based,
+                        r1=num_sheet_rows,
+                        c0=idx,
+                        c1=idx + 1,
+                    ),
+                    "cell": {"userEnteredFormat": {"numberFormat": fmt}},
+                    "fields": "userEnteredFormat.numberFormat",
+                }
+            }
+        )
+    if not requests:
+        return
+    try:
+        ws.spreadsheet.batch_update({"requests": requests})
+    except Exception as exc:
+        logger.warning("Number formatting failed: %s", exc)
 
 
 def apply_data_column_widths(ws: gspread.Worksheet, num_cols: int, min_width: int = 112) -> None:

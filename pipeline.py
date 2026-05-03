@@ -454,6 +454,27 @@ def _build_meta_df(meta_rows: list[dict[str, Any]], settings: Settings) -> pd.Da
     return meta_df_all[["Date"]].copy() if "Date" in meta_df_all.columns else meta_df_all.copy()
 
 
+def _meta_rows_from_campaign_rows(campaign_rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Daily Meta spend from META_CAMPAIGNS rows; keeps META_DATA aligned with campaign totals."""
+    if not campaign_rows:
+        return []
+    df = pd.DataFrame(campaign_rows)
+    if df.empty or "Date" not in df.columns or "Ad_Spend" not in df.columns:
+        return []
+    work = df[["Date", "Ad_Spend"]].copy()
+    work["Date"] = work["Date"].astype(str).str.strip()
+    work = work.loc[work["Date"] != ""].copy()
+    work["Ad_Spend"] = pd.to_numeric(work["Ad_Spend"], errors="coerce").fillna(0.0)
+    out = (
+        work.groupby("Date", as_index=False)["Ad_Spend"]
+        .sum()
+        .sort_values("Date", kind="stable")
+        .reset_index(drop=True)
+    )
+    out["Ad_Spend"] = out["Ad_Spend"].round(2)
+    return out.to_dict(orient="records")
+
+
 def _build_artifacts(
     settings: Settings,
     cost_maps,
@@ -700,7 +721,10 @@ def _run_full(settings: Settings, cost_maps) -> PipelineArtifacts:
         shopify_orders, line_rows = shopify_future.result()
         meta_rows = meta_future.result()
         meta_campaign_rows = meta_campaign_future.result() if meta_campaign_future else None
-    meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
+    campaign_daily_rows = _meta_rows_from_campaign_rows(meta_campaign_rows)
+    if campaign_daily_rows:
+        logger.info("META_DATA daily spend source: META_CAMPAIGNS campaign daily sums")
+    meta_rows = _merge_meta_rows_with_existing(settings, campaign_daily_rows or meta_rows)
     return _build_artifacts(
         settings,
         cost_maps,
@@ -794,7 +818,10 @@ def _run_reporting(settings: Settings, cost_maps, state: PipelineState) -> Pipel
         shopify_orders = shopify_future.result()
         meta_rows = meta_future.result()
         meta_campaign_rows = meta_campaign_future.result()
-    meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
+    campaign_daily_rows = _meta_rows_from_campaign_rows(meta_campaign_rows)
+    if campaign_daily_rows:
+        logger.info("META_DATA daily spend source: META_CAMPAIGNS campaign daily sums")
+    meta_rows = _merge_meta_rows_with_existing(settings, campaign_daily_rows or meta_rows)
     return _build_artifacts(
         settings,
         cost_maps,

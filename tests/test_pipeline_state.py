@@ -10,6 +10,7 @@ import pandas as pd
 from pipeline import (
     _load_meta_df,
     _load_orders_db_df,
+    _meta_rows_from_campaign_rows,
     _merge_meta_df,
     _merge_meta_rows_with_existing,
     _tracking_candidate_order_ids,
@@ -149,6 +150,22 @@ class PipelineSheetLoadTests(TestCase):
         with patch("pipeline._load_meta_df", return_value=existing):
             rows = _merge_meta_rows_with_existing(settings, [])
         self.assertEqual(rows, [{"Date": "2026-01-01", "Ad_Spend": 100.0}])
+
+    def test_meta_rows_from_campaign_rows_sums_daily_campaign_spend(self) -> None:
+        rows = _meta_rows_from_campaign_rows(
+            [
+                {"Date": "2026-05-01", "Campaign_ID": "1", "Ad_Spend": 10.125},
+                {"Date": "2026-05-01", "Campaign_ID": "2", "Ad_Spend": "5.335"},
+                {"Date": "2026-05-02", "Campaign_ID": "1", "Ad_Spend": 7},
+            ]
+        )
+        self.assertEqual(
+            rows,
+            [
+                {"Date": "2026-05-01", "Ad_Spend": 15.46},
+                {"Date": "2026-05-02", "Ad_Spend": 7.0},
+            ],
+        )
 
     def test_merge_meta_df_drops_duplicate_sheet_headers(self) -> None:
         existing = pd.DataFrame(

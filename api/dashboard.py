@@ -10,12 +10,7 @@ from typing import Any
 import pandas as pd
 
 from config import Settings, load_settings
-from pipeline import (
-    SHEET_BOOKKEEPING,
-    SHEET_DAILY,
-    SHEET_META_CAMPAIGNS,
-    SHEET_ORDER_LEVEL,
-)
+from pipeline import SHEET_DAILY, SHEET_ORDER_LEVEL
 from pipeline_state import PipelineState, load_pipeline_state
 import logging
 from sheets import try_read_worksheet_dataframe
@@ -31,8 +26,6 @@ class DashboardBundle:
     state: PipelineState
     order_level_df: pd.DataFrame
     daily_df: pd.DataFrame
-    meta_campaigns_df: pd.DataFrame
-    bookkeeping_df: pd.DataFrame
     missing_costs_df: pd.DataFrame
 
 
@@ -68,10 +61,9 @@ def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
     specs: list[tuple[str, tuple[str, ...] | None]] = [
         (SHEET_ORDER_LEVEL, ("Order_ID",)),
         (SHEET_DAILY, ("Date",)),
-        (SHEET_META_CAMPAIGNS, ("Date",)),
-        (SHEET_BOOKKEEPING, ("Month",)),
-        (missing_tab, None),
     ]
+    if missing_tab:
+        specs.append((missing_tab, None))
     max_workers = max(
         1,
         min(int(os.getenv("DASHBOARD_SHEET_READ_CONCURRENCY", "10")), 16),
@@ -85,17 +77,16 @@ def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
         f_state = ex.submit(_load_state_safe, settings)
         futures = [ex.submit(_load_one, s) for s in specs]
         state = f_state.result()
-        order_level_df, daily_df, meta_campaigns_df, bookkeeping_df, missing_costs_df = (
-            f.result() for f in futures
-        )
+        results = [f.result() for f in futures]
+        order_level_df = results[0]
+        daily_df = results[1]
+        missing_costs_df = results[2] if missing_tab else pd.DataFrame()
 
     return DashboardBundle(
         settings=settings,
         state=state,
         order_level_df=order_level_df,
         daily_df=daily_df,
-        meta_campaigns_df=meta_campaigns_df,
-        bookkeeping_df=bookkeeping_df,
         missing_costs_df=missing_costs_df,
     )
 
@@ -221,15 +212,6 @@ def dashboard_executive_thresholds() -> dict[str, dict[str, Any]]:
 def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
     daily_recent = _recent_window(bundle.daily_df, 30)
     order_level_recent = _recent_window(bundle.order_level_df, 30)
-    bookkeeping = bundle.bookkeeping_df.copy()
-    latest_month = None
-    latest_operating_income = None
-    if not bookkeeping.empty and "Month" in bookkeeping.columns:
-        bookkeeping = bookkeeping.sort_values("Month")
-        latest = bookkeeping.iloc[-1]
-        latest_month = str(latest.get("Month") or "")
-        if "Operating_income" in bookkeeping.columns:
-            latest_operating_income = _to_numeric(pd.Series([latest.get("Operating_income")])).iloc[0]
 
     revenue_30 = _to_numeric(daily_recent.get("Revenue", pd.Series(dtype=float))).sum()
     gross_profit_30 = _to_numeric(daily_recent.get("Gross_Profit", pd.Series(dtype=float))).sum()
@@ -257,28 +239,17 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
         {
             "label": "Last Sync",
             "value": _fmt_timestamp_short(last_sync),
-            "meta": bundle.state.last_successful_run_kind or "bez state",
+            "meta": bundle.state.last_successful_run_kind or "pipeline",
         },
-        {"label": "Operating Income", "value": _fmt_money(latest_operating_income), "meta": latest_month or "BOOKKEEPING"},
     ]
 
 
 def run_status_rows(bundle: DashboardBundle) -> list[dict[str, str]]:
     rows = [
         {
-            "job": "core",
+            "job": "pipeline",
             "last_run": _fmt_timestamp_short(bundle.state.last_core_sync_at),
-            "purpose": "Shopify + supplier + daily Meta + hlavné taby",
-        },
-        {
-            "job": "tracking",
-            "last_run": _fmt_timestamp_short(bundle.state.last_tracking_sync_at),
-            "purpose": "17TRACK + delivery refresh",
-        },
-        {
-            "job": "reporting",
-            "last_run": _fmt_timestamp_short(bundle.state.last_reporting_sync_at),
-            "purpose": "META_CAMPAIGNS + BOOKKEEPING",
+            "purpose": "Shopify orders + Meta daily spend + supplier costs → Sheets",
         },
     ]
     if bundle.state.last_error_summary:
@@ -328,34 +299,6 @@ def recent_daily_table(bundle: DashboardBundle, limit: int = 30) -> pd.DataFrame
         "Orders_Undelivered",
     ]
     return df[[c for c in preferred if c in df.columns]].head(limit)
-
-
-def marketing_campaign_table(bundle: DashboardBundle, limit: int = 50) -> pd.DataFrame:
-    df = bundle.meta_campaigns_df.copy()
-    if df.empty:
-        return df
-    if "Date" in df.columns:
-        df = _coerce_date_col(df).sort_values(["Date"], ascending=False)
-        df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
-    preferred = [
-        "Date",
-        "Campaign_Name",
-        "Campaign_ID",
-        "Ad_Spend",
-        "Purchase_Value",
-        "Purchases",
-        "ROAS",
-    ]
-    return df[[c for c in preferred if c in df.columns]].head(limit)
-
-
-def bookkeeping_table(bundle: DashboardBundle, limit: int = 24) -> pd.DataFrame:
-    df = bundle.bookkeeping_df.copy()
-    if df.empty:
-        return df
-    if "Month" in df.columns:
-        df = df.sort_values("Month", ascending=False)
-    return df.head(limit)
 
 
 def missing_costs_table(bundle: DashboardBundle, limit: int = 50) -> pd.DataFrame:

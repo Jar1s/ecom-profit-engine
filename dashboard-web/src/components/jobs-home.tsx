@@ -38,14 +38,13 @@ export function JobsHome() {
   const qc = useQueryClient();
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [overrides, setOverrides] = useState<PipelineRunOverrides>({
-    meta_campaign_insights: true,
     meta_continue_on_error: true,
     sheets_fancy_layout: false,
-    sheets_conditional_format: true,
-    shopify_fulfillment_enrich: true,
+    sheets_conditional_format: false,
+    shopify_fulfillment_enrich: false,
     shopify_fulfillment_refetch_early: false,
-    shopify_graphql_fulfillment_verify: true,
-    track17_enabled: true,
+    shopify_graphql_fulfillment_verify: false,
+    track17_enabled: false,
   });
   const q = useQuery({
     queryKey: ["jobs"],
@@ -53,7 +52,7 @@ export function JobsHome() {
   });
 
   const runMut = useMutation({
-    mutationFn: (mode: string) => apiPostJson<PipelineRunResult>(`/run/${mode}`, { overrides }),
+    mutationFn: () => apiPostJson<PipelineRunResult>(`/run/full`, { overrides }),
     onSettled: () => {
       void qc.invalidateQueries({ queryKey: ["jobs"] });
       void qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -72,17 +71,9 @@ export function JobsHome() {
     );
   }
 
-  const jobRows: [string, string, string, "primary" | "secondary" | "ghost"][] = [
-    ["auto", "Vyberie core / tracking / reporting podľa PIPELINE_STATE", "Spustiť", "primary"],
-    ["core", "Shopify + supplier costs + daily Meta + hlavné taby", "Spustiť", "primary"],
-    ["tracking", "17TRACK + delivery refresh len pre aktívne zásielky", "Spustiť", "secondary"],
-    ["reporting", "META_CAMPAIGNS a BOOKKEEPING", "Spustiť", "secondary"],
-    ["full", "Fallback / debug celý pipeline v jednom kroku", "Spustiť", "ghost"],
-  ];
   const optionRows: [keyof PipelineRunOverrides, string, string][] = [
-    ["sheets_fancy_layout", "Sheets dashboard layout", "Súhrnné bloky, grafy a šírky stĺpcov; pomalšie na Verceli."],
+    ["sheets_fancy_layout", "Sheets dashboard layout", "Súhrnné bloky a šírky stĺpcov; pomalšie na Verceli."],
     ["sheets_conditional_format", "Conditional formatting", "Zelené doručené riadky, červený profit a ROAS warning."],
-    ["meta_campaign_insights", "Meta campaigns", "Campaign × day rozpad pre marketing a reporting."],
     ["meta_continue_on_error", "Pokračovať pri Meta chybe", "Shopify a Sheets dobehnú aj keď Meta token/API zlyhá."],
     ["shopify_fulfillment_enrich", "Shopify fulfillment detail", "REST detail objednávok, keď list response nemá shipment status."],
     ["shopify_graphql_fulfillment_verify", "Shopify GraphQL delivery verify", "Overí Fulfillment.displayStatus pre presnejšie delivered stavy."],
@@ -99,15 +90,15 @@ export function JobsHome() {
       <header>
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Jobs</h1>
         <p className="mt-2 text-slate-600">
-          Manuálna operatíva nad schedulerom a snapshot z <span className="font-mono text-sm">PIPELINE_STATE</span>.
+          Manuálny beh pipeline a snapshot z <span className="font-mono text-sm">PIPELINE_STATE</span>.
         </p>
       </header>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Run jobs</CardTitle>
-            <CardDescription>Pipeline režimy a per-run voľby bez zmeny Vercel env.</CardDescription>
+            <CardTitle>Run pipeline</CardTitle>
+            <CardDescription>Jeden beh: Shopify objednávky, Meta denný spend, supplier costs → Google Sheets.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-lg border border-slate-200 bg-white">
@@ -146,32 +137,21 @@ export function JobsHome() {
                 </div>
               ) : null}
             </div>
-            <ul className="space-y-4">
-              {jobRows.map(([mode, desc, label, kind]) => (
-                <li
-                  key={mode}
-                  className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <div>
-                    <p className="text-sm font-semibold capitalize text-slate-900">{mode}</p>
-                    <p className="mt-1 text-sm text-slate-600">{desc}</p>
-                  </div>
-                  <Button
-                    variant={kind === "primary" ? "primary" : kind === "secondary" ? "secondary" : "ghost"}
-                    className="shrink-0"
-                    disabled={runMut.isPending}
-                    onClick={() => runMut.mutate(mode)}
-                  >
-                    {runMut.isPending && runMut.variables === mode ? (
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    ) : (
-                      <Play className="h-4 w-4" aria-hidden />
-                    )}
-                    {label}
-                  </Button>
-                </li>
-              ))}
-            </ul>
+            <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-slate-50/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Full pipeline</p>
+                <p className="mt-1 text-sm text-slate-600">ORDERS_DB, ORDER_LEVEL, META_DATA, DAILY_SUMMARY (+ voliteľný report chýbajúcich nákladov).</p>
+              </div>
+              <Button
+                variant="primary"
+                className="shrink-0"
+                disabled={runMut.isPending}
+                onClick={() => runMut.mutate()}
+              >
+                {runMut.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
+                Spustiť
+              </Button>
+            </div>
             {runMut.data || runMut.error ? (
               <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-sm text-slate-700">
                 {runMut.error instanceof Error

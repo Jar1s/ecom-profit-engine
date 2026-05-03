@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 
+import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -17,11 +18,9 @@ if _ROOT not in sys.path:
 
 from . import ui
 from .dashboard import (
-    bookkeeping_table,
     dashboard_executive_thresholds,
     dataframe_to_json_records,
     load_dashboard_bundle,
-    marketing_campaign_table,
     missing_costs_table,
     recent_daily_table,
     recent_orders_table,
@@ -97,7 +96,7 @@ def _spa_export_html_path(request: Request) -> str:
         return os.path.join(_STATIC_APP_DIR, "index.html")
     if path.startswith("/app/"):
         segment = path.removeprefix("/app/").split("/")[0]
-        allowed = {"orders", "daily", "marketing", "accounting", "costs", "jobs"}
+        allowed = {"orders", "daily", "marketing", "costs", "jobs"}
         if segment in allowed:
             candidate = os.path.join(_STATIC_APP_DIR, f"{segment}.html")
             if os.path.isfile(candidate):
@@ -137,9 +136,7 @@ def _legacy_app_html(request: Request) -> Response:
         rd = recent_daily_table(bundle, limit=100)
         meta_cols = [c for c in rd.columns if c in ("Date", "Ad_Spend", "Marketing_ROAS")]
         meta_table = rd[meta_cols] if not rd.empty and meta_cols else rd
-        return HTMLResponse(ui.page_marketing(meta_table, marketing_campaign_table(bundle, limit=100)))
-    if path == "/app/accounting":
-        return HTMLResponse(ui.page_accounting(bookkeeping_table(bundle, limit=36)))
+        return HTMLResponse(ui.page_marketing(meta_table, pd.DataFrame()))
     if path == "/app/costs":
         return HTMLResponse(ui.page_costs(missing_costs_table(bundle, limit=100)))
     if path == "/app/jobs":
@@ -263,7 +260,7 @@ def _pipeline_after_import() -> dict[str, object]:
     try:
         from pipeline import main
 
-        code = main("auto")
+        code = main()
         out["pipeline_ran"] = True
         out["pipeline_exit_code"] = code
         out["pipeline_ok"] = code == 0
@@ -413,16 +410,9 @@ def api_app_marketing(request: Request) -> JSONResponse:
     return JSONResponse(
         {
             "meta_daily": dataframe_to_json_records(meta_table),
-            "campaigns": dataframe_to_json_records(marketing_campaign_table(bundle, limit=100)),
+            "campaigns": [],
         }
     )
-
-
-@app.get("/api/app/accounting", response_model=None)
-def api_app_accounting(request: Request) -> JSONResponse:
-    _require_app_session_api(request)
-    bundle = load_dashboard_bundle()
-    return JSONResponse({"rows": dataframe_to_json_records(bookkeeping_table(bundle, limit=36))})
 
 
 @app.get("/api/app/costs", response_model=None)
@@ -443,7 +433,7 @@ def api_app_jobs(request: Request) -> JSONResponse:
 async def api_app_run(request: Request, mode: str) -> JSONResponse:
     _require_app_session_api(request)
     mode_norm = (mode or "").strip().lower()
-    if mode_norm not in {"auto", "full", "core", "tracking", "reporting"}:
+    if not mode_norm:
         raise HTTPException(status_code=404, detail="Unknown pipeline mode")
     body: dict[str, object] = {}
     try:
@@ -457,16 +447,12 @@ async def api_app_run(request: Request, mode: str) -> JSONResponse:
     try:
         from pipeline import main
 
-        code = main(mode_norm, run_overrides=run_overrides)
+        code = main(None, run_overrides=run_overrides)
         ok = code == 0
-        msg = (
-            f"Pipeline mód {mode_norm} sa úspešne aktualizoval."
-            if ok
-            else f"Pipeline mód {mode_norm} skončil s návratovým kódom {code}."
-        )
+        msg = "Pipeline sa úspešne dokončil." if ok else f"Pipeline skončil s návratovým kódom {code}."
         return JSONResponse(
             status_code=200 if ok else 500,
-            content={"ok": ok, "exitCode": code, "mode": mode_norm, "message": msg},
+            content={"ok": ok, "exitCode": code, "mode": "full", "message": msg},
         )
     except Exception as exc:
         logger.exception("App pipeline failed for mode=%s", mode_norm)
@@ -481,7 +467,6 @@ async def api_app_run(request: Request, mode: str) -> JSONResponse:
 @app.get("/app/orders", response_model=None)
 @app.get("/app/daily", response_model=None)
 @app.get("/app/marketing", response_model=None)
-@app.get("/app/accounting", response_model=None)
 @app.get("/app/costs", response_model=None)
 @app.get("/app/jobs", response_model=None)
 def app_shell(request: Request) -> Response:
@@ -532,22 +517,18 @@ def app_naklady(request: Request) -> Response:
     return RedirectResponse(url="/app/costs", status_code=302)
 
 
-def _run_pipeline_mode_html(mode: str, back_href: str = "/app/jobs") -> HTMLResponse:
+def _run_pipeline_mode_html(back_href: str = "/app/jobs") -> HTMLResponse:
     try:
         from pipeline import main
 
-        code = main(mode)
+        code = main()
         ok = code == 0
-        msg = (
-            f"Pipeline mód {mode} sa úspešne aktualizoval."
-            if ok
-            else f"Pipeline mód {mode} skončil s návratovým kódom {code}."
-        )
-        body = ui.page_message(ok=ok, title=f"Run {mode}", message=msg, back_href=back_href)
+        msg = "Pipeline sa úspešne dokončil." if ok else f"Pipeline skončil s návratovým kódom {code}."
+        body = ui.page_message(ok=ok, title="Run pipeline", message=msg, back_href=back_href)
         return HTMLResponse(body, status_code=200 if ok else 500)
     except Exception as exc:
-        logger.exception("App pipeline failed for mode=%s", mode)
-        body = ui.page_message(ok=False, title=f"Chyba pipeline ({mode})", message=str(exc), back_href=back_href)
+        logger.exception("App pipeline failed")
+        body = ui.page_message(ok=False, title="Chyba pipeline", message=str(exc), back_href=back_href)
         return HTMLResponse(body, status_code=500)
 
 
@@ -556,7 +537,7 @@ def app_report(request: Request) -> Response:
     redir = _require_app_user(request)
     if redir:
         return redir
-    return _run_pipeline_mode_html("full", back_href="/app")
+    return _run_pipeline_mode_html(back_href="/app")
 
 
 @app.post("/app/run/{mode}", response_class=HTMLResponse, response_model=None)
@@ -565,9 +546,9 @@ def app_run_mode(request: Request, mode: str) -> Response:
     if redir:
         return redir
     mode_norm = (mode or "").strip().lower()
-    if mode_norm not in {"auto", "full", "core", "tracking", "reporting"}:
+    if not mode_norm:
         raise HTTPException(status_code=404, detail="Unknown pipeline mode")
-    return _run_pipeline_mode_html(mode_norm)
+    return _run_pipeline_mode_html()
 
 
 @app.api_route("/cron", methods=["GET", "POST"])
@@ -577,7 +558,7 @@ def run_pipeline(request: Request) -> JSONResponse:
     try:
         from pipeline import main
 
-        code = main("auto")
+        code = main()
         body: dict = {"ok": code == 0, "exitCode": code}
         return JSONResponse(status_code=200 if code == 0 else 500, content=body)
     except Exception as exc:
@@ -596,12 +577,12 @@ def run_pipeline_core(request: Request) -> JSONResponse:
     try:
         from pipeline import main
 
-        code = main("core")
-        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "core"})
+        code = main()
+        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "full"})
     except Exception as exc:
         logger.exception("Pipeline core failed")
         logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
-        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "core"})
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "full"})
 
 
 @app.api_route("/cron/tracking", methods=["GET", "POST"])
@@ -610,12 +591,12 @@ def run_pipeline_tracking(request: Request) -> JSONResponse:
     try:
         from pipeline import main
 
-        code = main("tracking")
-        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "tracking"})
+        code = main()
+        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "full"})
     except Exception as exc:
         logger.exception("Pipeline tracking failed")
         logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
-        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "tracking"})
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "full"})
 
 
 @app.api_route("/cron/reporting", methods=["GET", "POST"])
@@ -624,12 +605,12 @@ def run_pipeline_reporting(request: Request) -> JSONResponse:
     try:
         from pipeline import main
 
-        code = main("reporting")
-        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "reporting"})
+        code = main()
+        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "full"})
     except Exception as exc:
         logger.exception("Pipeline reporting failed")
         logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
-        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "reporting"})
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "full"})
 
 
 @app.get("/debug/shopify-env")

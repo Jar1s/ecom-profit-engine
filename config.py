@@ -130,7 +130,7 @@ def _item_catalog_sheet_tab() -> str | None:
 
 
 def _missing_supplier_costs_tab() -> str | None:
-    s = os.getenv("MISSING_SUPPLIER_COSTS_TAB", "MISSING_SUPPLIER_COSTS").strip()
+    s = os.getenv("MISSING_SUPPLIER_COSTS_TAB", "").strip()
     return s if s else None
 
 
@@ -277,7 +277,7 @@ def load_settings() -> Settings:
             "GOOGLE_SHEET_ID or GOOGLE_SHEET_URL (open by id; only Sheets API required)."
         )
 
-    track17_enabled = _env_bool("TRACK17_ENABLED", True)
+    track17_enabled = _env_bool("TRACK17_ENABLED", False)
     track17_api_key = os.getenv("TRACK17_API_KEY", "").strip() or None
     if not track17_enabled:
         track17_api_key = None
@@ -297,7 +297,7 @@ def load_settings() -> Settings:
         meta_lookback_days=_optional_int("META_LOOKBACK_DAYS", 90),
         meta_time_range_since=os.getenv("META_TIME_RANGE_SINCE", "").strip() or None,
         meta_time_range_until=os.getenv("META_TIME_RANGE_UNTIL", "").strip() or None,
-        meta_campaign_insights=_env_bool("META_CAMPAIGN_INSIGHTS", True),
+        meta_campaign_insights=_env_bool("META_CAMPAIGN_INSIGHTS", False),
         meta_continue_on_error=_env_bool("META_CONTINUE_ON_ERROR", True),
         google_sheet_id=google_sheet_id,
         google_sheet_name=google_sheet_name,
@@ -320,25 +320,25 @@ def load_settings() -> Settings:
         # do not multiply Ad_Spend by USD_PER_LOCAL_UNIT for *_USD columns; merge with
         # Shopify daily (AUD) converts Meta USD → AUD via USD_PER_LOCAL_UNIT.
         meta_spend_in_usd=_env_bool("META_SPEND_IN_USD", True),
-        sheets_fancy_layout=_env_bool("SHEETS_FANCY_LAYOUT", True),
+        sheets_fancy_layout=_env_bool("SHEETS_FANCY_LAYOUT", False),
         meta_purchase_action_types=_meta_purchase_action_types(),
         meta_action_attribution_windows=_meta_action_attribution_windows(),
-        sheets_conditional_format=_env_bool("SHEETS_CONDITIONAL_FORMAT", True),
+        sheets_conditional_format=_env_bool("SHEETS_CONDITIONAL_FORMAT", False),
         sheets_roas_warn_below=_sheets_roas_warn_below(),
         daily_summary_usd_primary=_env_bool("DAILY_SUMMARY_USD_PRIMARY", True),
         supplier_bill_single_orders_tab=_supplier_bill_single_orders_tab(),
         learn_costs_from_orders_sheet=_env_bool("LEARN_COSTS_FROM_ORDERS_SHEET", False),
         item_catalog_sheet_tab=_item_catalog_sheet_tab(),
         missing_supplier_costs_tab=_missing_supplier_costs_tab(),
-        shopify_fulfillment_enrich=_env_bool("SHOPIFY_FULFILLMENT_ENRICH", True),
+        shopify_fulfillment_enrich=_env_bool("SHOPIFY_FULFILLMENT_ENRICH", False),
         shopify_fulfillment_refetch_early=_env_bool("SHOPIFY_FULFILLMENT_REFETCH_EARLY", False),
-        shopify_graphql_fulfillment_verify=_env_bool("SHOPIFY_GRAPHQL_FULFILLMENT_VERIFY", True),
+        shopify_graphql_fulfillment_verify=_env_bool("SHOPIFY_GRAPHQL_FULFILLMENT_VERIFY", False),
         shopify_graphql_verify_max=_optional_int("SHOPIFY_GRAPHQL_VERIFY_MAX", 500),
         track17_api_key=track17_api_key,
         # 0 = no cap (query all distinct tracking numbers in the run). Set a positive limit to protect API quota.
         track17_max_trackings_per_run=_optional_int("TRACK17_MAX_TRACKINGS_PER_RUN", 0),
-        pipeline_mode=(os.getenv("PIPELINE_MODE", "auto").strip().lower() or "auto"),
-        pipeline_enable_incremental=_env_bool("PIPELINE_ENABLE_INCREMENTAL", True),
+        pipeline_mode=(os.getenv("PIPELINE_MODE", "full").strip().lower() or "full"),
+        pipeline_enable_incremental=_env_bool("PIPELINE_ENABLE_INCREMENTAL", False),
         pipeline_enable_parity_check=_env_bool("PIPELINE_ENABLE_PARITY_CHECK", False),
         pipeline_state_tab=(os.getenv("PIPELINE_STATE_TAB", "PIPELINE_STATE").strip() or "PIPELINE_STATE"),
         pipeline_overlap_minutes=max(0, _optional_int("PIPELINE_OVERLAP_MINUTES", 10)),

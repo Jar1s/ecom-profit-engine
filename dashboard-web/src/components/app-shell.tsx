@@ -10,7 +10,6 @@ const nav = [
   { href: "/orders", label: "Orders" },
   { href: "/daily", label: "Daily" },
   { href: "/marketing", label: "Marketing" },
-  { href: "/accounting", label: "Accounting" },
   { href: "/costs", label: "Costs" },
   { href: "/jobs", label: "Jobs" },
 ];

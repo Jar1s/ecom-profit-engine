@@ -30,28 +30,17 @@ export function MarketingHome() {
     <div className="space-y-6">
       <header>
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Marketing</h1>
-        <p className="mt-2 text-slate-600">Denný Meta spend a rozpad podľa kampaní.</p>
+        <p className="mt-2 text-slate-600">Denný Meta spend (META_DATA), ktorý sa zlučuje do DAILY_SUMMARY.</p>
       </header>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>META_DATA</CardTitle>
-            <CardDescription>Denný spend, ktorý feeduje DAILY_SUMMARY.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <DataTable rows={data.meta_daily} empty="META_DATA zatiaľ bez dát." />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>META_CAMPAIGNS</CardTitle>
-            <CardDescription>Kampaň × deň — spend a výkon.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <DataTable rows={data.campaigns} empty="META_CAMPAIGNS zatiaľ bez dát." />
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>META_DATA</CardTitle>
+          <CardDescription>Denný súčet spendu z Meta Marketing API.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DataTable rows={data.meta_daily} empty="META_DATA zatiaľ bez dát." />
+        </CardContent>
+      </Card>
     </div>
   );
 }

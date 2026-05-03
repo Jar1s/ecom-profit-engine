@@ -23,7 +23,6 @@ from .dashboard import (
     load_dashboard_bundle,
     marketing_campaign_table,
     missing_costs_table,
-    payouts_fees_table,
     recent_daily_table,
     recent_orders_table,
     run_status_rows,
@@ -98,7 +97,7 @@ def _spa_export_html_path(request: Request) -> str:
         return os.path.join(_STATIC_APP_DIR, "index.html")
     if path.startswith("/app/"):
         segment = path.removeprefix("/app/").split("/")[0]
-        allowed = {"orders", "daily", "marketing", "accounting", "payouts", "costs", "jobs"}
+        allowed = {"orders", "daily", "marketing", "accounting", "costs", "jobs"}
         if segment in allowed:
             candidate = os.path.join(_STATIC_APP_DIR, f"{segment}.html")
             if os.path.isfile(candidate):
@@ -141,8 +140,6 @@ def _legacy_app_html(request: Request) -> Response:
         return HTMLResponse(ui.page_marketing(meta_table, marketing_campaign_table(bundle, limit=100)))
     if path == "/app/accounting":
         return HTMLResponse(ui.page_accounting(bookkeeping_table(bundle, limit=36)))
-    if path == "/app/payouts":
-        return HTMLResponse(ui.page_payouts(payouts_fees_table(bundle, limit=150)))
     if path == "/app/costs":
         return HTMLResponse(ui.page_costs(missing_costs_table(bundle, limit=100)))
     if path == "/app/jobs":
@@ -428,13 +425,6 @@ def api_app_accounting(request: Request) -> JSONResponse:
     return JSONResponse({"rows": dataframe_to_json_records(bookkeeping_table(bundle, limit=36))})
 
 
-@app.get("/api/app/payouts", response_model=None)
-def api_app_payouts(request: Request) -> JSONResponse:
-    _require_app_session_api(request)
-    bundle = load_dashboard_bundle()
-    return JSONResponse({"rows": dataframe_to_json_records(payouts_fees_table(bundle, limit=150))})
-
-
 @app.get("/api/app/costs", response_model=None)
 def api_app_costs(request: Request) -> JSONResponse:
     _require_app_session_api(request)
@@ -453,7 +443,7 @@ def api_app_jobs(request: Request) -> JSONResponse:
 async def api_app_run(request: Request, mode: str) -> JSONResponse:
     _require_app_session_api(request)
     mode_norm = (mode or "").strip().lower()
-    if mode_norm not in {"auto", "full", "business", "core", "tracking", "reporting"}:
+    if mode_norm not in {"auto", "full", "core", "tracking", "reporting"}:
         raise HTTPException(status_code=404, detail="Unknown pipeline mode")
     body: dict[str, object] = {}
     try:
@@ -492,7 +482,6 @@ async def api_app_run(request: Request, mode: str) -> JSONResponse:
 @app.get("/app/daily", response_model=None)
 @app.get("/app/marketing", response_model=None)
 @app.get("/app/accounting", response_model=None)
-@app.get("/app/payouts", response_model=None)
 @app.get("/app/costs", response_model=None)
 @app.get("/app/jobs", response_model=None)
 def app_shell(request: Request) -> Response:
@@ -576,7 +565,7 @@ def app_run_mode(request: Request, mode: str) -> Response:
     if redir:
         return redir
     mode_norm = (mode or "").strip().lower()
-    if mode_norm not in {"auto", "full", "business", "core", "tracking", "reporting"}:
+    if mode_norm not in {"auto", "full", "core", "tracking", "reporting"}:
         raise HTTPException(status_code=404, detail="Unknown pipeline mode")
     return _run_pipeline_mode_html(mode_norm)
 
@@ -641,20 +630,6 @@ def run_pipeline_reporting(request: Request) -> JSONResponse:
         logger.exception("Pipeline reporting failed")
         logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "reporting"})
-
-
-@app.api_route("/cron/business", methods=["GET", "POST"])
-def run_pipeline_business(request: Request) -> JSONResponse:
-    _check_auth(request)
-    try:
-        from pipeline import main
-
-        code = main("business")
-        return JSONResponse(status_code=200 if code == 0 else 500, content={"ok": code == 0, "exitCode": code, "mode": "business"})
-    except Exception as exc:
-        logger.exception("Pipeline business failed")
-        logger.error("pipeline_error=%s", str(exc).replace("\n", " ")[:2000])
-        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc), "mode": "business"})
 
 
 @app.get("/debug/shopify-env")

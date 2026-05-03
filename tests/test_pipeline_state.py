@@ -8,15 +8,12 @@ from unittest.mock import patch
 import pandas as pd
 
 from pipeline import (
-    _daily_meta_rows_prefer_campaign_sum,
     _load_meta_df,
     _load_orders_db_df,
     _merge_meta_rows_with_existing,
-    _meta_frame_to_rows,
     _tracking_candidate_order_ids,
     _updated_at_min_from_state,
 )
-from transform import meta_rows_for_daily_merge
 from pipeline_state import PipelineState, load_pipeline_state, save_pipeline_state
 
 
@@ -124,28 +121,3 @@ class PipelineSheetLoadTests(TestCase):
         self.assertEqual(by_date["2026-01-01"], 5.0)
         self.assertEqual(by_date["2026-04-30"], 12.5)
         self.assertEqual(by_date["2026-05-01"], 7.0)
-
-    def test_meta_frame_to_rows_then_merge_single_usd_to_aud_conversion(self) -> None:
-        """Regression: do not USD→AUD in _meta_frame_to_rows; merge does it once."""
-        settings = SimpleNamespace(meta_spend_in_usd=True, usd_per_local=0.65)
-        df = pd.DataFrame([{"Date": "2026-04-01", "Ad_Spend_USD": 65.0}])
-        rows = _meta_frame_to_rows(df, settings)  # type: ignore[arg-type]
-        self.assertEqual(rows[0]["Ad_Spend"], 65.0)
-        merged = meta_rows_for_daily_merge(rows, meta_spend_in_usd=True, usd_per_local=0.65)
-        self.assertEqual(merged[0]["Ad_Spend"], 100.0)
-
-    def test_daily_meta_prefer_campaign_sum(self) -> None:
-        account = [
-            {"Date": "2026-01-01", "Ad_Spend": 100.0},
-            {"Date": "2025-12-01", "Ad_Spend": 50.0},
-        ]
-        camp = pd.DataFrame(
-            [
-                {"Date": "2026-01-01", "Ad_Spend": 30.0},
-                {"Date": "2026-01-01", "Ad_Spend": 40.0},
-            ]
-        )
-        out = _daily_meta_rows_prefer_campaign_sum(account, camp)
-        by_d = {r["Date"]: r["Ad_Spend"] for r in out}
-        self.assertEqual(by_d["2026-01-01"], 70.0)
-        self.assertEqual(by_d["2025-12-01"], 50.0)

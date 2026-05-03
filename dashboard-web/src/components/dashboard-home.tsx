@@ -257,8 +257,6 @@ export function DashboardHome() {
     "Revenue 30d": revenue30,
     "Gross Profit 30d": gross30,
     "Ad Spend 30d": ad30,
-    "Payout Fees 30d": null,
-    "Payment net 30d": null,
     "ROAS 30d": ad30 > 0 ? revenue30 / ad30 : null,
     "Orders 30d": orders30,
     Undelivered: undeliveredNow,
@@ -268,7 +266,6 @@ export function DashboardHome() {
     AOV: aov,
     "Delivery Rate": deliveryRate,
     "Profit After Ads": profitAfterAds,
-    "Profit After Fees": null,
     "Undelivered Now": undeliveredNow,
     "Undelivered 30d": undelivered30,
     "Avg Transit Days": avgTransit,
@@ -284,8 +281,6 @@ export function DashboardHome() {
     "Revenue 30d": pctDelta(sumField(last7, "Revenue"), sumField(prev7, "Revenue")),
     "Gross Profit 30d": pctDelta(sumField(last7, "Gross_Profit"), sumField(prev7, "Gross_Profit")),
     "Ad Spend 30d": pctDelta(sumField(last7, "Ad_Spend"), sumField(prev7, "Ad_Spend")),
-    "Payout Fees 30d": null,
-    "Payment net 30d": null,
     "ROAS 30d": pctDelta(avgField(last7, "Marketing_ROAS"), avgField(prev7, "Marketing_ROAS")),
     "Orders 30d": pctDelta(sumField(last7, "Orders_Total"), sumField(prev7, "Orders_Total")),
     Undelivered: pctDelta(sumField(last7, "Orders_Undelivered"), sumField(prev7, "Orders_Undelivered")),
@@ -309,7 +304,6 @@ export function DashboardHome() {
         : 0,
     ),
     "Profit After Ads": pctDelta(sumField(last7, "Gross_Profit") - sumField(last7, "Ad_Spend"), sumField(prev7, "Gross_Profit") - sumField(prev7, "Ad_Spend")),
-    "Profit After Fees": null,
     "Undelivered Now": null,
     "Undelivered 30d": pctDelta(sumField(last7, "Orders_Undelivered"), sumField(prev7, "Orders_Undelivered")),
     "Avg Transit Days": null,
@@ -318,13 +312,10 @@ export function DashboardHome() {
     "Revenue 30d": dailySorted.slice(-12).map((r) => num(r.Revenue)),
     "Gross Profit 30d": dailySorted.slice(-12).map((r) => num(r.Gross_Profit)),
     "Ad Spend 30d": dailySorted.slice(-12).map((r) => num(r.Ad_Spend)),
-    "Payout Fees 30d": [],
-    "Payment net 30d": [],
     "ROAS 30d": dailySorted.slice(-12).map((r) => num(r.Marketing_ROAS)),
     "Orders 30d": dailySorted.slice(-12).map((r) => num(r.Orders_Total)),
     Undelivered: dailySorted.slice(-12).map((r) => num(r.Orders_Undelivered)),
     "Operating Income": [],
-    "Profit After Fees": [],
   };
 
   const sheetBtn = st.sheet_url ? (
@@ -412,7 +403,6 @@ export function DashboardHome() {
               <div className="flex flex-wrap gap-3">
                 {(
                   [
-                    ["business", "primary", "Run Business"],
                     ["core", "primary", "Run Core"],
                     ["tracking", "secondary", "Run Tracking"],
                     ["reporting", "secondary", "Run Reporting"],

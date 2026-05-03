@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import logging
 import re
 from typing import Any
@@ -20,15 +19,6 @@ from normalize import (
 
 logger = logging.getLogger(__name__)
 _DELIVERED_WORD_RE = re.compile(r"\bdelivered\b", re.IGNORECASE)
-
-
-def _first_nonempty_gateway(series: pd.Series) -> str:
-    """Prefer any non-blank gateway when aggregating line items → order (``first`` can pick an empty)."""
-    for v in series:
-        t = str(v or "").strip()
-        if t:
-            return t
-    return ""
 
 
 def _is_delivered_row(row: pd.Series) -> bool:
@@ -49,156 +39,65 @@ def _line_unit_cost(
     *,
     order_counts: dict[str, int],
     lineage_map: dict[str, float],
-    match_counts: Counter[str] | None = None,
 ) -> float:
-    """
-    Prefer an exact product-title cost, then **SKU** (exact + prefix rules), then
-    broader product-title lineage.
-
-    This keeps manually curated Product rows authoritative while still allowing SKU
-    to fix cases where Shopify variant titles differ from supplier titles. Broader
-    stripped-title fallbacks stay below SKU because they can match nearby variants.
-    """
     k = row["Product_Normalized"]
-    exact_product_cost = cost_maps.by_product.get(k)
-    if exact_product_cost is not None and exact_product_cost > 0:
-        if match_counts is not None:
-            match_counts["exact_product"] += 1
-        return float(exact_product_cost)
-
+    for cand in product_title_family_levels(k):
+        pl = lineage_map.get(cand)
+        if pl is not None and pl > 0:
+            return float(pl)
     sku_raw = str(row.get("SKU") or "").strip()
     sk = normalize_sku(sku_raw)
     if sk:
         uc = cost_maps.by_sku.get(sk)
-        if uc is not None and float(uc) > 0:
-            if match_counts is not None:
-                match_counts["sku"] += 1
+        if uc is not None:
             return float(uc)
         for prefix, cost in cost_maps.sku_prefix_rules:
-            if sk.startswith(prefix) and float(cost) > 0:
-                if match_counts is not None:
-                    match_counts["sku_prefix"] += 1
+            if sk.startswith(prefix):
                 return float(cost)
-
-    for cand in product_title_family_levels(k)[1:]:
-        pl = lineage_map.get(cand)
-        if pl is not None and pl > 0:
-            if match_counts is not None:
-                match_counts["product_lineage"] += 1
-            return float(pl)
     ord_name = str(row.get("Order") or "").strip()
     if ord_name and order_counts.get(ord_name, 0) == 1:
         on = normalize_order_number(ord_name)
         if on:
             uo = cost_maps.by_order_single.get(on)
             if uo is not None and uo > 0:
-                if match_counts is not None:
-                    match_counts["order_single"] += 1
                 return float(uo)
     lc = cost_maps.learned_by_product_sku
     if (k, sk) in lc:
-        if match_counts is not None:
-            match_counts["learned_product_sku"] += 1
         return float(lc[(k, sk)])
     if (k, "") in lc:
-        if match_counts is not None:
-            match_counts["learned_product"] += 1
         return float(lc[(k, "")])
-    if match_counts is not None:
-        match_counts["missing"] += 1
     return 0.0
-
-
-# Logical column order for ORDERS_DB (line items): date/order/product → money → payments → FX → fulfillment → IDs/SKU/qty.
-ORDERS_DB_PREFERRED_COLUMN_ORDER: tuple[str, ...] = (
-    "Date",
-    "Order",
-    "Product",
-    "Revenue_USD",
-    "Revenue",
-    "Product_Cost",
-    "Gross_Profit_USD",
-    "Gross_Profit",
-    "Refunds_Total",
-    "Payment_Gateway_Names",
-    "Payment_Net",
-    "Payment_Net_Estimate",
-    "Fulfillment_Status",
-    "Shipment_Status",
-    "Delivery_Status",
-    "Tracking_Numbers",
-    "Tracking_Companies",
-    "Carrier_Tracking_Status",
-    "Shipped_Date",
-    "Days_In_Transit",
-    "Order_ID",
-    "Line_Item_ID",
-    "SKU",
-    "Quantity",
-)
-
-ORDERS_DB_EMPTY_COLUMNS = [c for c in ORDERS_DB_PREFERRED_COLUMN_ORDER if not c.endswith("_USD")]
-
-
-ORDER_LEVEL_PREFERRED_COLUMN_ORDER: tuple[str, ...] = (
-    "Date",
-    "Order",
-    "Order_ID",
-    "Fulfillment_Status",
-    "Shipment_Status",
-    "Delivery_Status",
-    "Tracking_Numbers",
-    "Tracking_Companies",
-    "Carrier_Tracking_Status",
-    "Shipped_Date",
-    "Days_In_Transit",
-    "Revenue_USD",
-    "Revenue",
-    "Product_Cost",
-    "Gross_Profit_USD",
-    "Gross_Profit",
-    "Refunds_Total",
-    "Net_Revenue_After_Refunds",
-    "Gross_Profit_After_Refunds",
-    "Payment_Gateway_Names",
-    "Payment_Net",
-    "Payment_Net_Estimate",
-)
-
-
-def reorder_orders_db_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Reorder ORDERS_DB columns for Sheets: related fields adjacent (not arbitrary dict/concat order).
-    Unknown columns (future pipeline fields) append in their original relative order.
-    """
-    if df.empty:
-        return df
-    df = df.drop(columns=["Refund_Ratio_pct", "Product_Cost_USD"], errors="ignore")
-    preferred = [c for c in ORDERS_DB_PREFERRED_COLUMN_ORDER if c in df.columns]
-    seen = set(preferred)
-    rest = [c for c in df.columns if c not in seen]
-    return df[preferred + rest].copy()
-
-
-def reorder_order_level_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """Reorder ORDER_LEVEL columns so USD mirror amounts sit directly before shop-currency columns."""
-    if df.empty:
-        return df
-    preferred = [c for c in ORDER_LEVEL_PREFERRED_COLUMN_ORDER if c in df.columns]
-    seen = set(preferred)
-    rest = [c for c in df.columns if c not in seen]
-    return df[preferred + rest].copy()
 
 
 def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.DataFrame:
     """
-    Unit cost resolution order: presný názov produktu → presné SKU a ITEM_CATALOG prefix
-    → širší názov produktu (rovnaký model, iná farba cez odseknuté `` - …``)
-    → jednopoložková objednávka (BillDetail) → learned ORDERS_DB.
+    Unit cost resolution order: product title (vrátane „rovnaký model, iná farba“ cez odseknuté
+    koncovky `` - …``) → presné SKU → ITEM_CATALOG prefix → jednopoložková objednávka → learned ORDERS_DB.
     """
     df = pd.DataFrame(rows)
     if df.empty:
-        return pd.DataFrame(columns=ORDERS_DB_EMPTY_COLUMNS)
+        return pd.DataFrame(
+            columns=[
+                "Date",
+                "Order",
+                "Order_ID",
+                "Fulfillment_Status",
+                "Shipment_Status",
+                "Delivery_Status",
+                "Tracking_Numbers",
+                "Tracking_Companies",
+                "Carrier_Tracking_Status",
+                "Shipped_Date",
+                "Days_In_Transit",
+                "Line_Item_ID",
+                "Product",
+                "SKU",
+                "Quantity",
+                "Revenue",
+                "Product_Cost",
+                "Gross_Profit",
+            ]
+        )
 
     if "SKU" not in df.columns:
         df["SKU"] = ""
@@ -207,49 +106,18 @@ def enrich_line_items(rows: list[dict[str, Any]], cost_maps: CostMaps) -> pd.Dat
     lineage_map = cost_maps.by_product_lineage
     if not lineage_map and cost_maps.by_product:
         lineage_map = build_product_lineage_index(cost_maps.by_product)
-    match_counts: Counter[str] = Counter()
     unit_cost = df.apply(
         lambda r: _line_unit_cost(
             r,
             cost_maps,
             order_counts=order_counts,
             lineage_map=lineage_map,
-            match_counts=match_counts,
         ),
         axis=1,
     ).astype(float)
-    if len(df):
-        logger.info(
-            "cost_match_summary total=%s exact_product=%s sku=%s sku_prefix=%s product_lineage=%s order_single=%s learned_product_sku=%s learned_product=%s missing=%s",
-            len(df),
-            match_counts["exact_product"],
-            match_counts["sku"],
-            match_counts["sku_prefix"],
-            match_counts["product_lineage"],
-            match_counts["order_single"],
-            match_counts["learned_product_sku"],
-            match_counts["learned_product"],
-            match_counts["missing"],
-        )
-        if match_counts["missing"]:
-            missing_samples = (
-                df.loc[unit_cost <= 0, ["Product", "SKU"]]
-                .drop_duplicates()
-                .head(10)
-                .to_dict("records")
-            )
-            logger.warning(
-                "cost_match_missing_samples count=%s samples=%s",
-                match_counts["missing"],
-                missing_samples,
-            )
     qty = df["Quantity"].astype(float) if "Quantity" in df.columns else pd.Series(1.0, index=df.index)
     df["Product_Cost"] = (unit_cost * qty).round(2)
     df["Gross_Profit"] = (df["Revenue"].astype(float) - df["Product_Cost"]).round(2)
-    if "Payment_Gateway_Names" not in df.columns:
-        df["Payment_Gateway_Names"] = ""
-    else:
-        df["Payment_Gateway_Names"] = df["Payment_Gateway_Names"].fillna("").astype(str)
     df = df.drop(columns=["Product_Normalized"], errors="ignore")
     return df
 
@@ -273,12 +141,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
                 "Revenue",
                 "Product_Cost",
                 "Gross_Profit",
-                "Refunds_Total",
-                "Net_Revenue_After_Refunds",
-                "Gross_Profit_After_Refunds",
-                "Payment_Gateway_Names",
-                "Payment_Net",
-                "Payment_Net_Estimate",
             ]
         )
     agg: dict[str, Any] = {
@@ -286,15 +148,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         "Product_Cost": ("Product_Cost", "sum"),
         "Gross_Profit": ("Gross_Profit", "sum"),
     }
-    if "Refunds_Total" in df.columns:
-        agg["Refunds_Total"] = ("Refunds_Total", "max")
-    if "Payment_Net" in df.columns:
-        # Line items carry a revenue share of order net; sum restores order-level payout total.
-        agg["Payment_Net"] = ("Payment_Net", "sum")
-    if "Payment_Gateway_Names" in df.columns:
-        agg["Payment_Gateway_Names"] = ("Payment_Gateway_Names", _first_nonempty_gateway)
-    if "Payment_Net_Estimate" in df.columns:
-        agg["Payment_Net_Estimate"] = ("Payment_Net_Estimate", "sum")
     for col in (
         "Fulfillment_Status",
         "Shipment_Status",
@@ -308,16 +161,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         if col in df.columns:
             agg[col] = (col, "first")
     grouped = df.groupby(["Date", "Order", "Order_ID"], dropna=False).agg(**agg).reset_index()
-    refunds_num = pd.to_numeric(
-        grouped["Refunds_Total"] if "Refunds_Total" in grouped.columns else pd.Series(0.0, index=grouped.index),
-        errors="coerce",
-    ).fillna(0.0)
-    revenue_num = pd.to_numeric(grouped["Revenue"], errors="coerce").fillna(0.0)
-    cost_num = pd.to_numeric(grouped["Product_Cost"], errors="coerce").fillna(0.0)
-    grouped["Net_Revenue_After_Refunds"] = (revenue_num - refunds_num).round(2)
-    grouped["Gross_Profit_After_Refunds"] = (grouped["Net_Revenue_After_Refunds"] - cost_num).round(2)
-    if "Refunds_Total" in grouped.columns:
-        grouped["Refunds_Total"] = refunds_num.round(2)
     preferred = [
         "Date",
         "Order",
@@ -333,12 +176,6 @@ def order_level_summary(df: pd.DataFrame) -> pd.DataFrame:
         "Revenue",
         "Product_Cost",
         "Gross_Profit",
-        "Refunds_Total",
-        "Net_Revenue_After_Refunds",
-        "Gross_Profit_After_Refunds",
-        "Payment_Gateway_Names",
-        "Payment_Net",
-        "Payment_Net_Estimate",
     ]
     ordered = [c for c in preferred if c in grouped.columns]
     rest = [c for c in grouped.columns if c not in ordered]
@@ -411,7 +248,6 @@ def daily_summary_from_orders(df: pd.DataFrame) -> pd.DataFrame:
                 "Revenue",
                 "Product_Cost",
                 "Gross_Profit",
-                "Refunds_Total",
                 "Orders_Total",
                 "Orders_Delivered",
                 "Orders_Undelivered",
@@ -455,22 +291,6 @@ def daily_summary_from_orders(df: pd.DataFrame) -> pd.DataFrame:
         daily["Orders_Delivered"] = 0
         daily["Orders_Undelivered"] = 0
 
-    if "Refunds_Total" in df.columns and "Order" in df.columns:
-        per_order_rf = (
-            df.groupby(["Date", "Order"], dropna=False)["Refunds_Total"]
-            .max()
-            .reset_index()
-        )
-        refunds_daily = (
-            per_order_rf.groupby("Date", dropna=False)["Refunds_Total"]
-            .sum()
-            .reset_index()
-        )
-        daily = daily.merge(refunds_daily, on="Date", how="left")
-        daily["Refunds_Total"] = pd.to_numeric(daily["Refunds_Total"], errors="coerce").fillna(0.0).round(2)
-    else:
-        daily["Refunds_Total"] = 0.0
-
     daily["Revenue"] = daily["Revenue"].round(2)
     daily["Product_Cost"] = daily["Product_Cost"].round(2)
     daily["Gross_Profit"] = daily["Gross_Profit"].round(2)
@@ -495,8 +315,6 @@ def merge_daily_with_meta(daily: pd.DataFrame, meta_rows: list[dict[str, Any]]) 
     merged["Revenue"] = merged["Revenue"].fillna(0)
     merged["Product_Cost"] = merged["Product_Cost"].fillna(0)
     merged["Gross_Profit"] = merged["Gross_Profit"].fillna(0)
-    if "Refunds_Total" in merged.columns:
-        merged["Refunds_Total"] = merged["Refunds_Total"].fillna(0)
 
     def roas(row: pd.Series) -> float | None:
         spend = row.get("Ad_Spend")
@@ -512,31 +330,21 @@ def merge_daily_with_meta(daily: pd.DataFrame, meta_rows: list[dict[str, Any]]) 
     return merged
 
 
-def enrich_usd_columns(
-    df: pd.DataFrame,
-    usd_per_local: float | None,
-    *,
-    include_refunds_usd: bool = False,
-) -> pd.DataFrame:
+def enrich_usd_columns(df: pd.DataFrame, usd_per_local: float | None) -> pd.DataFrame:
     """
     Append *_USD columns by multiplying local currency columns by USD_PER_LOCAL_UNIT
     (how many USD for one unit of shop/report currency, e.g. 0.65 if 1 AUD ≈ 0.65 USD).
-
-    Refunds: Shopify amounts are in shop currency. ``Refunds_Total`` → ``Refunds_USD`` is
-    only appended when ``include_refunds_usd`` is True (DAILY_SUMMARY merge) so order-level
-    sheets keep a single shop-currency refunds column.
     """
     if not usd_per_local or usd_per_local <= 0:
         return df
     out = df.copy()
-    pairs: list[tuple[str, str]] = [
+    pairs = [
         ("Revenue", "Revenue_USD"),
+        ("Product_Cost", "Product_Cost_USD"),
         ("Gross_Profit", "Gross_Profit_USD"),
         ("Ad_Spend", "Ad_Spend_USD"),
         ("Purchase_Value", "Purchase_Value_USD"),
     ]
-    if include_refunds_usd:
-        pairs.insert(1, ("Refunds_Total", "Refunds_USD"))
     for src, dst in pairs:
         if src not in out.columns:
             continue
@@ -548,15 +356,17 @@ def enrich_usd_columns(
 def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
     """
     For DAILY_SUMMARY only: drop shop-currency columns and use ``*_USD`` as the main
-    columns (renamed to Revenue, Gross_Profit, Ad_Spend). ``Product_Cost`` is left as-is
-    (one COGS column; no ``Product_Cost_USD`` duplicate). Refunds follow
-    shop currency in the pipeline until here: ``Refunds_USD`` replaces ``Refunds_Total``
-    so the tab is not mixing AUD refunds with USD revenue. Recomputes ``Marketing_ROAS`` and
-    adds ``Net_Profit`` = Gross_Profit − Ad_Spend (same basis as ROAS).
+    columns (renamed to Revenue, Product_Cost, Gross_Profit, Ad_Spend). Recomputes
+    ``Marketing_ROAS`` and adds ``Net_Profit`` = Gross_Profit − Ad_Spend (same basis as ROAS).
 
     No-op when ``USD_PER_LOCAL_UNIT`` was not applied (missing ``*_USD`` columns).
     """
-    required = ("Revenue_USD", "Gross_Profit_USD", "Ad_Spend_USD")
+    required = (
+        "Revenue_USD",
+        "Product_Cost_USD",
+        "Gross_Profit_USD",
+        "Ad_Spend_USD",
+    )
     if not all(c in df.columns for c in required):
         logger.info(
             "daily_summary_usd_primary skipped (set USD_PER_LOCAL_UNIT for %s)",
@@ -564,19 +374,16 @@ def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
         )
         return df
     out = df.copy()
-    for c in ("Revenue", "Gross_Profit", "Ad_Spend"):
+    for c in ("Revenue", "Product_Cost", "Gross_Profit", "Ad_Spend"):
         out = out.drop(columns=[c], errors="ignore")
     out = out.rename(
         columns={
             "Revenue_USD": "Revenue",
+            "Product_Cost_USD": "Product_Cost",
             "Gross_Profit_USD": "Gross_Profit",
             "Ad_Spend_USD": "Ad_Spend",
         }
     )
-    out = out.drop(columns=["Product_Cost_USD"], errors="ignore")
-    if "Refunds_USD" in out.columns:
-        out = out.drop(columns=["Refunds_Total"], errors="ignore")
-        out = out.rename(columns={"Refunds_USD": "Refunds_Total"})
 
     def roas(row: pd.Series) -> float | None:
         spend = row.get("Ad_Spend")
@@ -595,7 +402,6 @@ def daily_summary_usd_primary(df: pd.DataFrame) -> pd.DataFrame:
     preferred = [
         "Date",
         "Revenue",
-        "Refunds_Total",
         "Product_Cost",
         "Gross_Profit",
         "Ad_Spend",
@@ -634,7 +440,7 @@ def enrich_meta_usd_columns(
             s = pd.to_numeric(out["Purchase_Value"], errors="coerce").fillna(0.0).round(2)
             out["Purchase_Value_USD"] = s
         return out
-    return enrich_usd_columns(df, usd_per_local, include_refunds_usd=False)
+    return enrich_usd_columns(df, usd_per_local)
 
 
 def meta_rows_for_daily_merge(

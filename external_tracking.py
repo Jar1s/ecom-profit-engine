@@ -2,15 +2,8 @@
 Optional carrier tracking via 17TRACK API (not Shopify).
 
 Shopify exposes tracking numbers on fulfillments; 17TRACK aggregates many carriers.
-
-Switch source (paid vs Shopify-only):
-  ``CARRIER_TRACKING_SOURCE=shopify`` — only Shopify fulfillment/shipment fields;
-  ``Carrier_Tracking_Status`` uses the ``Shopify: …`` rollup from delivery/shipment columns (no 17TRACK HTTP calls).
-  ``CARRIER_TRACKING_SOURCE=17track`` (default) — set ``TRACK17_API_KEY`` and keep ``TRACK17_ENABLED=1`` to query 17TRACK.
-
-Temporarily pause 17TRACK without changing mode: ``TRACK17_ENABLED=0`` (keeps key in env).
-
-Set TRACK17_API_KEY (from https://api.17track.net) when using 17track mode.
+Set TRACK17_API_KEY (from https://api.17track.net) to fill ``Carrier_Tracking_Status``.
+Set TRACK17_ENABLED=0 to skip all 17TRACK calls (keeps TRACK17_API_KEY in env; saves cron time when quota is hit).
 
 Reliability notes:
 - We map ``tracking_company`` strings from Shopify to 17TRACK carrier IDs (auto-detect ``carrier: 0``

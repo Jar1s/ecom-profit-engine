@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
-import threading
-import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -17,10 +15,10 @@ from pipeline import (
     SHEET_DAILY,
     SHEET_META_CAMPAIGNS,
     SHEET_ORDER_LEVEL,
-    SHEET_PAYOUTS_FEES,
 )
 from pipeline_state import PipelineState, load_pipeline_state
-from sheets import read_dashboard_sheet_tabs
+import logging
+from sheets import try_read_worksheet_dataframe
 
 logger = logging.getLogger("ecom_profit_engine.dashboard")
 
@@ -35,8 +33,14 @@ class DashboardBundle:
     daily_df: pd.DataFrame
     meta_campaigns_df: pd.DataFrame
     bookkeeping_df: pd.DataFrame
-    payouts_fees_df: pd.DataFrame
     missing_costs_df: pd.DataFrame
+
+
+def _load_df(settings: Settings, tab: str, required: tuple[str, ...] | None = None) -> pd.DataFrame:
+    df = try_read_worksheet_dataframe(settings, tab, required_headers=required)
+    if df is None:
+        return pd.DataFrame()
+    return df.copy()
 
 
 def dataframe_to_json_records(df: pd.DataFrame) -> list[dict[str, Any]]:
@@ -54,45 +58,36 @@ def _load_state_safe(settings: Settings) -> PipelineState:
         return PipelineState(last_error_summary=f"Dashboard state unavailable: {exc}")
 
 
-_bundle_cache_lock = threading.Lock()
-_bundle_cache: tuple[float, str, DashboardBundle] | None = None
-
-
-def clear_dashboard_bundle_cache() -> None:
-    """Drop cached dashboard bundle (call after pipeline writes to Sheets so /app sees fresh data)."""
-    global _bundle_cache
-    with _bundle_cache_lock:
-        _bundle_cache = None
-
-
-def _dashboard_bundle_cache_key(settings: Settings) -> str:
-    return f"{settings.google_sheet_id or ''}|{settings.google_sheet_name or ''}"
-
-
-def _load_dashboard_bundle_uncached(settings: Settings) -> DashboardBundle:
+def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
     """
-    Load dashboard tabs: one spreadsheet open + parallel tab reads (see sheets.read_dashboard_sheet_tabs).
-    Skips ORDERS_DB / META_DATA — unused by /app.
+    Load dashboard tabs in parallel. Each tab was previously opened sequentially (very slow).
+    ORDERS_DB and META_DATA are not used by any dashboard view — skip full-sheet reads.
     """
+    settings = settings or load_settings()
     missing_tab = settings.missing_supplier_costs_tab
     specs: list[tuple[str, tuple[str, ...] | None]] = [
         (SHEET_ORDER_LEVEL, ("Order_ID",)),
         (SHEET_DAILY, ("Date",)),
         (SHEET_META_CAMPAIGNS, ("Date",)),
         (SHEET_BOOKKEEPING, ("Month",)),
-        (SHEET_PAYOUTS_FEES, ("Date",)),
         (missing_tab, None),
     ]
-    state = _load_state_safe(settings)
-    sheets_out = read_dashboard_sheet_tabs(settings, specs)
-    (
-        order_level_df,
-        daily_df,
-        meta_campaigns_df,
-        bookkeeping_df,
-        payouts_fees_df,
-        missing_costs_df,
-    ) = sheets_out
+    max_workers = max(
+        1,
+        min(int(os.getenv("DASHBOARD_SHEET_READ_CONCURRENCY", "10")), 16),
+    )
+
+    def _load_one(spec: tuple[str, tuple[str, ...] | None]) -> pd.DataFrame:
+        tab, req = spec
+        return _load_df(settings, tab, required=req)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        f_state = ex.submit(_load_state_safe, settings)
+        futures = [ex.submit(_load_one, s) for s in specs]
+        state = f_state.result()
+        order_level_df, daily_df, meta_campaigns_df, bookkeeping_df, missing_costs_df = (
+            f.result() for f in futures
+        )
 
     return DashboardBundle(
         settings=settings,
@@ -101,38 +96,8 @@ def _load_dashboard_bundle_uncached(settings: Settings) -> DashboardBundle:
         daily_df=daily_df,
         meta_campaigns_df=meta_campaigns_df,
         bookkeeping_df=bookkeeping_df,
-        payouts_fees_df=payouts_fees_df,
         missing_costs_df=missing_costs_df,
     )
-
-
-def load_dashboard_bundle(settings: Settings | None = None) -> DashboardBundle:
-    """
-    Cached dashboard bundle load. Repeated /api/app/* hits reuse recent Sheets reads (short TTL).
-    Set DASHBOARD_BUNDLE_CACHE_SECONDS=0 to disable.
-    """
-    global _bundle_cache
-    settings = settings or load_settings()
-    try:
-        ttl = float(os.getenv("DASHBOARD_BUNDLE_CACHE_SECONDS", "20"))
-    except ValueError:
-        ttl = 20.0
-    key = _dashboard_bundle_cache_key(settings)
-    now = time.monotonic()
-    if ttl > 0:
-        with _bundle_cache_lock:
-            if _bundle_cache is not None:
-                ts, cached_key, bundle = _bundle_cache
-                if cached_key == key and (now - ts) < ttl:
-                    return bundle
-
-    bundle = _load_dashboard_bundle_uncached(settings)
-
-    if ttl > 0:
-        with _bundle_cache_lock:
-            _bundle_cache = (time.monotonic(), key, bundle)
-
-    return bundle
 
 
 def _to_numeric(series: pd.Series) -> pd.Series:
@@ -205,8 +170,6 @@ _EXEC_THRESH_DEFAULTS: dict[str, dict[str, Any]] = {
     "Undelivered 30d": {"mode": "lower_better", "green": 60.0, "amber": 120.0},
     "Avg Transit Days": {"mode": "lower_better", "green": 5.0, "amber": 8.0},
     "Profit After Ads": {"mode": "higher_better", "green": 0.0, "amber": -500.0},
-    "Profit After Fees": {"mode": "higher_better", "green": 0.0, "amber": -500.0},
-    "Payment net 30d": {"mode": "higher_better", "green": 0.0, "amber": -500.0},
 }
 
 
@@ -269,16 +232,8 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
             latest_operating_income = _to_numeric(pd.Series([latest.get("Operating_income")])).iloc[0]
 
     revenue_30 = _to_numeric(daily_recent.get("Revenue", pd.Series(dtype=float))).sum()
-    refunds_30 = 0.0
-    if not daily_recent.empty and "Refunds_Total" in daily_recent.columns:
-        refunds_30 = _to_numeric(daily_recent.get("Refunds_Total", pd.Series(dtype=float))).sum()
     gross_profit_30 = _to_numeric(daily_recent.get("Gross_Profit", pd.Series(dtype=float))).sum()
     ad_spend_30 = _to_numeric(daily_recent.get("Ad_Spend", pd.Series(dtype=float))).sum()
-    payouts_recent = _recent_window(bundle.payouts_fees_df, 30)
-    payout_fees_30 = _to_numeric(payouts_recent.get("Fee_Amount", pd.Series(dtype=float))).sum()
-    payment_net_30 = 0.0
-    if not order_level_recent.empty and "Payment_Net" in order_level_recent.columns:
-        payment_net_30 = _to_numeric(order_level_recent.get("Payment_Net", pd.Series(dtype=float))).sum()
     orders_30 = _to_numeric(daily_recent.get("Orders_Total", pd.Series(dtype=float))).sum()
     delivered_30 = _to_numeric(daily_recent.get("Orders_Delivered", pd.Series(dtype=float))).sum()
     undelivered_now = 0.0
@@ -286,7 +241,6 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
         delivery = order_level_recent["Delivery_Status"].astype(str).str.strip().str.lower()
         undelivered_now = float((delivery != "delivered").sum())
     roas_30 = (revenue_30 / ad_spend_30) if ad_spend_30 > 0 else None
-    profit_after_fees_30 = gross_profit_30 - ad_spend_30 - payout_fees_30
     last_sync = _latest_timestamp(
         bundle.state.last_core_sync_at,
         bundle.state.last_tracking_sync_at,
@@ -295,31 +249,11 @@ def summary_cards(bundle: DashboardBundle) -> list[dict[str, str]]:
 
     return [
         {"label": "Revenue 30d", "value": _fmt_money(revenue_30), "meta": "z DAILY_SUMMARY"},
-        {
-            "label": "Refunds 30d",
-            "value": _fmt_money(refunds_30),
-            "meta": (
-                "z DAILY_SUMMARY (Refunds_Total v USD, rovnako ako Revenue pri USD_PRIMARY)"
-                if bundle.settings.daily_summary_usd_primary
-                else "z DAILY_SUMMARY (Refunds_Total v mene obchodu)"
-            ),
-        },
         {"label": "Gross Profit 30d", "value": _fmt_money(gross_profit_30), "meta": "po supplier cost"},
         {"label": "Ad Spend 30d", "value": _fmt_money(ad_spend_30), "meta": "Meta daily spend"},
-        {"label": "Payout Fees 30d", "value": _fmt_money(payout_fees_30), "meta": "Shopify payouts fees"},
-        {
-            "label": "Payment net 30d",
-            "value": _fmt_money(payment_net_30),
-            "meta": "Shopify Payments ledger net (ORDER_LEVEL); stĺpec Payment_Net_Estimate je len pri PAYMENT_NET_ESTIMATE",
-        },
         {"label": "ROAS 30d", "value": _fmt_ratio(roas_30), "meta": "Revenue / Ad Spend"},
         {"label": "Orders 30d", "value": _fmt_int(orders_30), "meta": f"Delivered {_fmt_int(delivered_30)}"},
         {"label": "Undelivered", "value": _fmt_int(undelivered_now), "meta": "aktívne order-level"},
-        {
-            "label": "Profit After Fees",
-            "value": _fmt_money(profit_after_fees_30),
-            "meta": "Gross Profit - Ads - Payout fees (30d)",
-        },
         {
             "label": "Last Sync",
             "value": _fmt_timestamp_short(last_sync),
@@ -366,12 +300,6 @@ def recent_orders_table(bundle: DashboardBundle, limit: int = 30) -> pd.DataFram
         "Revenue",
         "Product_Cost",
         "Gross_Profit",
-        "Refunds_Total",
-        "Net_Revenue_After_Refunds",
-        "Gross_Profit_After_Refunds",
-        "Payment_Gateway_Names",
-        "Payment_Net",
-        "Payment_Net_Estimate",
         "Delivery_Status",
         "Shipment_Status",
         "Carrier_Tracking_Status",
@@ -391,7 +319,6 @@ def recent_daily_table(bundle: DashboardBundle, limit: int = 30) -> pd.DataFrame
     preferred = [
         "Date",
         "Revenue",
-        "Refunds_Total",
         "Product_Cost",
         "Gross_Profit",
         "Ad_Spend",
@@ -429,28 +356,6 @@ def bookkeeping_table(bundle: DashboardBundle, limit: int = 24) -> pd.DataFrame:
     if "Month" in df.columns:
         df = df.sort_values("Month", ascending=False)
     return df.head(limit)
-
-
-def payouts_fees_table(bundle: DashboardBundle, limit: int = 120) -> pd.DataFrame:
-    df = bundle.payouts_fees_df.copy()
-    if df.empty:
-        return df
-    if "Date" in df.columns:
-        df = _coerce_date_col(df).sort_values("Date", ascending=False)
-        df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
-    preferred = [
-        "Date",
-        "Payout_ID",
-        "Payout_Status",
-        "Currency",
-        "Transaction_Type",
-        "Source_Type",
-        "Source_Order_ID",
-        "Gross_Amount",
-        "Fee_Amount",
-        "Net_Amount",
-    ]
-    return df[[c for c in preferred if c in df.columns]].head(limit)
 
 
 def missing_costs_table(bundle: DashboardBundle, limit: int = 50) -> pd.DataFrame:

@@ -2,7 +2,6 @@
 
 import unittest
 
-from config import normalize_carrier_tracking_source
 from external_tracking import (
     _status_line_from_track_info,
     order_tracking_columns,
@@ -38,12 +37,6 @@ class TestExternalTracking(unittest.TestCase):
             ship_cols={"Delivery_Status": "Delivered", "Shipment_Status": "delivered"},
         )
         self.assertEqual(cols["Carrier_Tracking_Status"], "Shopify: Delivered")
-
-    def test_normalize_carrier_tracking_source(self) -> None:
-        self.assertEqual(normalize_carrier_tracking_source(None), "17track")
-        self.assertEqual(normalize_carrier_tracking_source("shopify"), "shopify")
-        self.assertEqual(normalize_carrier_tracking_source("shopify_only"), "shopify")
-        self.assertEqual(normalize_carrier_tracking_source("17track"), "17track")
 
 
 if __name__ == "__main__":

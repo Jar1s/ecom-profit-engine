@@ -81,68 +81,6 @@ class TestBookkeepingUS(unittest.TestCase):
         self.assertEqual(row["Gross_profit"], 180.0)
         self.assertEqual(row["Marketing_advertising"], 30.0)
         self.assertEqual(row["Operating_income"], 150.0)
-        self.assertEqual(row["Payout_Fees_Total"], 0.0)
-
-    def test_bookkeeping_us_monthly_refund_buckets_and_payout_fees(self) -> None:
-        orders = [
-            {
-                "id": 1,
-                "created_at": "2026-01-10T12:00:00Z",
-                "total_line_items_price": "100",
-                "total_discounts": "0",
-                "subtotal_price": "100",
-                "total_tax": "0",
-                "total_shipping_price_set": {"shop_money": {"amount": "0", "currency_code": "USD"}},
-                "refunds": [{"transactions": [{"amount": "100"}]}],
-            },
-            {
-                "id": 2,
-                "created_at": "2026-01-11T12:00:00Z",
-                "total_line_items_price": "100",
-                "total_discounts": "0",
-                "subtotal_price": "100",
-                "total_tax": "0",
-                "total_shipping_price_set": {"shop_money": {"amount": "0", "currency_code": "USD"}},
-                "refunds": [{"transactions": [{"amount": "50"}]}],
-            },
-            {
-                "id": 3,
-                "created_at": "2026-01-12T12:00:00Z",
-                "total_line_items_price": "100",
-                "total_discounts": "0",
-                "subtotal_price": "100",
-                "total_tax": "0",
-                "total_shipping_price_set": {"shop_money": {"amount": "0", "currency_code": "USD"}},
-                "refunds": [{"transactions": [{"amount": "20"}]}],
-            },
-        ]
-        orders_df = pd.DataFrame(
-            [
-                {"Date": "2026-01-10", "Order_ID": 1, "Product_Cost": 20.0},
-                {"Date": "2026-01-11", "Order_ID": 2, "Product_Cost": 20.0},
-                {"Date": "2026-01-12", "Order_ID": 3, "Product_Cost": 20.0},
-            ]
-        )
-        daily_final = pd.DataFrame([{"Date": "2026-01-15", "Ad_Spend": 10.0}])
-        payout_monthly = pd.DataFrame([{"Month": "2026-01", "Payout_Fees_Total": 8.5}])
-        out = bookkeeping_us_monthly(
-            orders,
-            orders_df,
-            daily_final,
-            payout_fees_monthly_df=payout_monthly,
-        )
-        row = out.iloc[0]
-        self.assertEqual(row["Refunds_Full_Count"], 1)
-        self.assertEqual(row["Refunds_Half_Count"], 1)
-        self.assertEqual(row["Refunds_Other_Count"], 1)
-        self.assertEqual(row["Refunds_Full_Amount"], 100.0)
-        self.assertEqual(row["Refunds_Half_Amount"], 50.0)
-        self.assertEqual(row["Refunds_Other_Amount"], 20.0)
-        self.assertEqual(row["Payout_Fees_Total"], 8.5)
-        self.assertEqual(
-            row["Operating_Income_After_Payout_Fees"],
-            row["Operating_income"] - 8.5,
-        )
 
 
 if __name__ == "__main__":

@@ -2,15 +2,7 @@
 
 import unittest
 
-import pandas as pd
-
-from normalize import (
-    SHEET_DATE_COLUMN_NAMES,
-    normalize_order_number,
-    normalize_product_name,
-    product_title_family_levels,
-    sheet_date_to_iso,
-)
+from normalize import normalize_order_number, normalize_product_name, product_title_family_levels
 
 
 class TestNormalize(unittest.TestCase):
@@ -44,26 +36,6 @@ class TestNormalize(unittest.TestCase):
         self.assertIn(base, product_title_family_levels(beige))
         self.assertIn(base, product_title_family_levels(rose_ascii))
         self.assertIn(base, product_title_family_levels(rose_endash))
-
-    def test_sheet_date_to_iso_from_iso_string(self) -> None:
-        self.assertEqual(sheet_date_to_iso("2026-04-11"), "2026-04-11")
-        self.assertEqual(sheet_date_to_iso("2026-04-11T12:00:00Z"), "2026-04-11")
-
-    def test_sheet_date_to_iso_from_timestamp(self) -> None:
-        self.assertEqual(sheet_date_to_iso(pd.Timestamp("2026-04-11")), "2026-04-11")
-
-    def test_sheet_date_to_iso_from_serial_string(self) -> None:
-        out = sheet_date_to_iso("46102")
-        self.assertRegex(out, r"^\d{4}-\d{2}-\d{2}$")
-        self.assertTrue(out.startswith("2026-"), out)
-
-    def test_sheet_date_to_iso_empty_for_zero(self) -> None:
-        self.assertEqual(sheet_date_to_iso(0), "")
-        self.assertEqual(sheet_date_to_iso(0.0), "")
-        self.assertEqual(sheet_date_to_iso("0"), "")
-
-    def test_sheet_date_column_names_includes_shipped(self) -> None:
-        self.assertIn("Shipped_Date", SHEET_DATE_COLUMN_NAMES)
 
 
 if __name__ == "__main__":

@@ -11,7 +11,6 @@ const nav = [
   { href: "/daily", label: "Daily" },
   { href: "/marketing", label: "Marketing" },
   { href: "/accounting", label: "Accounting" },
-  { href: "/payouts", label: "Payouts" },
   { href: "/costs", label: "Costs" },
   { href: "/jobs", label: "Jobs" },
 ];

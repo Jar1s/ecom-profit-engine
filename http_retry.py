@@ -10,46 +10,11 @@ import requests
 
 from config import Settings
 
-_SHOPIFY_403_HINT_ORDERS = (
-    " In Shopify Admin → Settings → Apps and sales channels → Develop apps → your app → "
-    "Configuration: add Admin API scope **read_orders** (and save), then **reinstall** the app "
-    "on the store so the new token includes that scope."
+_SHOPIFY_403_HINT = (
+    " In Shopify Admin → Settings → Apps → your app: add Admin API scope "
+    "**read_orders** (and save), then **reinstall** the app on the store so the "
+    "new token includes that scope."
 )
-
-def _shopify_payments_403_followup(api_detail: str) -> str:
-    """
-    Actionable checklist when Shopify Payments REST returns 403 (often scope vs token vs product).
-    api_detail = substring from JSON body already logged in the main error line.
-    """
-    low = (api_detail or "").lower()
-    lines = [
-        " — Payouts 403 — skontroluj v tomto poradí:",
-        " [1] Scope + nový token: po zmene scopes starý `shpat_` nemusí mať payouts.",
-        " Develop apps → app → Configuration → zapni **read_shopify_payments_payouts** → Save.",
-        " Dokonči **Install / Update** app na tomto obchode, potom API credentials → **Reveal** nový Admin API token",
-        " → `SHOPIFY_TOKEN` na **Production** Vercel + redeploy.",
-        " [2] Ten istý obchod: `SHOPIFY_STORE` musí byť shop, kde máš app nainštalovanú (rovnaký token/app).",
-        " [3] Shopify Payments: Settings → Payments — payouts endpoint vyžaduje **Shopify Payments**",
-        " (nie len externú bránu). Bez aktivovaného Shopify Payments môžeš mať 403 aj so správnym tokenom.",
-        " [4] Vlastník obchodu: pri „merchant approval“ sa prihlás ako **owner**",
-        " a dokonči súhlas / pending approval pre platobné alebo payout údaje appky.",
-    ]
-    if "merchant approval" in low or "approval" in low:
-        lines.append(
-            " [5] API spomína schválenie: v Admin hľadaj notifikácie/banner pri app alebo rozšírené oprávnenia pre payouts."
-        )
-    lines.append(
-        " Ak používaš **SHOPIFY_CLIENT_ID** + **SECRET** (bez statického tokenu): scopes nastav v Partner Dashboard"
-        " pre tú istú app + app musí byť nainštalovaná na tomto shop-e."
-    )
-    return " ".join(lines)
-
-
-def _shopify_403_hint(url: str | None, *, api_detail: str = "") -> str:
-    u = (url or "").lower()
-    if "shopify_payments" in u:
-        return _shopify_payments_403_followup(api_detail)
-    return _SHOPIFY_403_HINT_ORDERS
 
 _SHOPIFY_401_HINT = (
     " Check SHOPIFY_TOKEN (Custom App Admin API access token, usually starts with shpat_) "
@@ -165,7 +130,7 @@ def get_response(
                 else:
                     msg = f"{msg} for {response.url}"
                 if response.status_code == 403 and "myshopify.com" in (response.url or ""):
-                    msg = msg + _shopify_403_hint(response.url, api_detail=detail)
+                    msg = msg + _SHOPIFY_403_HINT
                 if response.status_code == 401 and "myshopify.com" in (response.url or ""):
                     msg = msg + _SHOPIFY_401_HINT
                 raise RuntimeError(msg) from None
@@ -207,7 +172,7 @@ def post_json_with_retry(
                 else:
                     msg = f"{msg} for {response.url}"
                 if response.status_code == 403 and "myshopify.com" in (response.url or ""):
-                    msg = msg + _shopify_403_hint(response.url, api_detail=detail)
+                    msg = msg + _SHOPIFY_403_HINT
                 raise RuntimeError(msg) from None
             return response.json()
         except requests.RequestException as exc:

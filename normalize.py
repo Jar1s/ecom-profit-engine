@@ -4,11 +4,6 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import date, datetime, timedelta
-from typing import Any
-
-# Columns written/read as calendar YYYY-MM-DD (never leave raw Sheets serials in cells).
-SHEET_DATE_COLUMN_NAMES: frozenset[str] = frozenset(("Date", "Shipped_Date"))
 
 _MULTI_SPACE = re.compile(r"\s+")
 
@@ -84,46 +79,3 @@ def normalize_order_number(order_ref: object) -> str:
         pass
     digits = "".join(re.findall(r"\d+", s))
     return digits
-
-
-def sheet_date_to_iso(value: Any) -> str:
-    """
-    One cell ``Date`` / ``Shipped_Date`` → ``YYYY-MM-DD`` string for Sheets and merges.
-
-    Google Sheets sometimes stores calendar days as numeric serials (~40k–55k). Exporting
-    ``pd.Timestamp`` raw can also turn into serials in the UI. Always prefer ISO text.
-    """
-    if value is None:
-        return ""
-    if isinstance(value, float) and math.isnan(value):
-        return ""
-    if isinstance(value, datetime):
-        return value.date().isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
-    try:
-        dt_date = getattr(value, "date", None)
-        if callable(dt_date):
-            d = dt_date()
-            if isinstance(d, date):
-                return d.isoformat()
-    except Exception:
-        pass
-    s = str(value).strip()
-    if not s or s.lower() in ("nat", "none", "nan"):
-        return ""
-    if len(s) >= 10 and s[4] in "-/" and s[7] in "-/":
-        return s[:10].replace("/", "-")
-    try:
-        xf = float(s)
-        if math.isnan(xf):
-            return ""
-        if abs(xf) < 1e-9:
-            return ""
-        # Google Sheets / Excel day serials (roughly 1954–2078); wider than before for old ships.
-        if 20000 <= xf <= 65000:
-            base = date(1899, 12, 30)
-            return (base + timedelta(days=int(round(xf)))).isoformat()
-    except ValueError:
-        pass
-    return s[:10] if len(s) >= 10 else ""

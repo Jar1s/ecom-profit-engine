@@ -8,7 +8,6 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -47,7 +46,6 @@ class Settings:
     meta_time_range_until: str | None
     meta_campaign_insights: bool
     meta_continue_on_error: bool
-    daily_meta_from_campaign_sum: bool  # DAILY_SUMMARY Ad_Spend from sum(META_CAMPAIGNS) per day vs account insights
     google_sheet_id: str | None
     google_sheet_name: str | None
     google_creds_path: Path | None
@@ -71,61 +69,16 @@ class Settings:
     missing_supplier_costs_tab: str | None  # Report tab: line items with Product_Cost=0; empty = off
     shopify_fulfillment_enrich: bool  # GET /orders/{id} when list omits fulfillments/shipment_status
     shopify_fulfillment_refetch_early: bool  # Also refetch when only label_* / confirmed (extra API calls)
-    shopify_payment_transaction_enrich: bool  # GET /orders/{id} when list lacks transaction payment_details
-    shopify_payment_transaction_enrich_max: int  # Max extra order GETs per run for payment labels; 0 = no cap
     shopify_graphql_fulfillment_verify: bool  # Admin GraphQL Fulfillment.displayStatus when REST not delivered
     shopify_graphql_verify_max: int  # Max GraphQL order lookups per run; 0 = no cap
     track17_api_key: str | None  # 17TRACK API — carrier status beyond Shopify (optional); None if disabled
     track17_max_trackings_per_run: int  # Max distinct tracking numbers per pipeline run (0 = no cap)
-    carrier_tracking_source: str  # shopify | 17track — Shopify-only vs optional paid 17TRACK enrichment
     pipeline_mode: str  # full | core | tracking | reporting
     pipeline_enable_incremental: bool
     pipeline_enable_parity_check: bool
     pipeline_state_tab: str
     pipeline_overlap_minutes: int
     tracking_active_lookback_days: int
-    payment_net_estimate: bool  # optional Payment_Net_Estimate when ledger Payment_Net is 0
-    payment_net_estimate_fees: dict[str, dict[str, float]] | None  # bucket -> {pct, fixed}; None = unset
-    shop_report_timezone: ZoneInfo | None  # IANA; unset = legacy Date from API string slice
-
-
-def _shop_report_timezone() -> ZoneInfo | None:
-    """SHOP_REPORT_TIMEZONE=America/New_York aligns Date with Shopify admin store timezone."""
-    raw = os.getenv("SHOP_REPORT_TIMEZONE", "").strip()
-    if not raw:
-        return None
-    try:
-        return ZoneInfo(raw)
-    except Exception as exc:
-        raise RuntimeError(
-            "SHOP_REPORT_TIMEZONE must be a valid IANA timezone "
-            f"(e.g. America/New_York, Europe/Bratislava); got {raw!r}"
-        ) from exc
-
-
-def _payment_net_estimate_fees() -> dict[str, dict[str, float]] | None:
-    """Parse PAYMENT_NET_ESTIMATE_FEES_JSON: {\"paypal\": {\"pct\": 0.034, \"fixed\": 0.35}, ...}."""
-    raw = os.getenv("PAYMENT_NET_ESTIMATE_FEES_JSON", "").strip()
-    if not raw:
-        return None
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError("PAYMENT_NET_ESTIMATE_FEES_JSON must be valid JSON") from exc
-    if not isinstance(parsed, dict):
-        raise RuntimeError("PAYMENT_NET_ESTIMATE_FEES_JSON must be a JSON object")
-    out: dict[str, dict[str, float]] = {}
-    for raw_key, raw_val in parsed.items():
-        if not isinstance(raw_key, str) or not isinstance(raw_val, dict):
-            continue
-        k = raw_key.strip().lower().replace(" ", "_")
-        try:
-            pct = float(raw_val.get("pct", 0))
-            fixed = float(raw_val.get("fixed", 0))
-        except (TypeError, ValueError):
-            continue
-        out[k] = {"pct": max(0.0, min(1.0, pct)), "fixed": max(0.0, fixed)}
-    return out if out else None
 
 
 def _require(name: str) -> str:
@@ -179,18 +132,6 @@ def _item_catalog_sheet_tab() -> str | None:
 def _missing_supplier_costs_tab() -> str | None:
     s = os.getenv("MISSING_SUPPLIER_COSTS_TAB", "MISSING_SUPPLIER_COSTS").strip()
     return s if s else None
-
-
-def normalize_carrier_tracking_source(raw: str | None) -> str:
-    """
-    CARRIER_TRACKING_SOURCE env:
-      shopify | shopify_only → only Shopify fulfillment/shipment fields (no 17TRACK HTTP calls).
-      17track | unset → use 17TRACK when TRACK17_API_KEY is set and TRACK17_ENABLED=1.
-    """
-    s = (raw or "").strip().lower()
-    if s in ("shopify", "shopify_only"):
-        return "shopify"
-    return "17track"
 
 
 def _sheets_roas_warn_below() -> float | None:
@@ -336,12 +277,9 @@ def load_settings() -> Settings:
             "GOOGLE_SHEET_ID or GOOGLE_SHEET_URL (open by id; only Sheets API required)."
         )
 
-    carrier_tracking_source = normalize_carrier_tracking_source(os.getenv("CARRIER_TRACKING_SOURCE"))
     track17_enabled = _env_bool("TRACK17_ENABLED", True)
     track17_api_key = os.getenv("TRACK17_API_KEY", "").strip() or None
-    if carrier_tracking_source == "shopify":
-        track17_api_key = None
-    elif not track17_enabled:
+    if not track17_enabled:
         track17_api_key = None
 
     return Settings(
@@ -361,7 +299,6 @@ def load_settings() -> Settings:
         meta_time_range_until=os.getenv("META_TIME_RANGE_UNTIL", "").strip() or None,
         meta_campaign_insights=_env_bool("META_CAMPAIGN_INSIGHTS", True),
         meta_continue_on_error=_env_bool("META_CONTINUE_ON_ERROR", True),
-        daily_meta_from_campaign_sum=_env_bool("DAILY_META_FROM_CAMPAIGN_SUM", True),
         google_sheet_id=google_sheet_id,
         google_sheet_name=google_sheet_name,
         google_creds_path=google_creds_path,
@@ -395,21 +332,15 @@ def load_settings() -> Settings:
         missing_supplier_costs_tab=_missing_supplier_costs_tab(),
         shopify_fulfillment_enrich=_env_bool("SHOPIFY_FULFILLMENT_ENRICH", True),
         shopify_fulfillment_refetch_early=_env_bool("SHOPIFY_FULFILLMENT_REFETCH_EARLY", False),
-        shopify_payment_transaction_enrich=_env_bool("SHOPIFY_PAYMENT_TRANSACTION_ENRICH", True),
-        shopify_payment_transaction_enrich_max=_optional_int("SHOPIFY_PAYMENT_TRANSACTION_ENRICH_MAX", 500),
         shopify_graphql_fulfillment_verify=_env_bool("SHOPIFY_GRAPHQL_FULFILLMENT_VERIFY", True),
         shopify_graphql_verify_max=_optional_int("SHOPIFY_GRAPHQL_VERIFY_MAX", 500),
         track17_api_key=track17_api_key,
         # 0 = no cap (query all distinct tracking numbers in the run). Set a positive limit to protect API quota.
         track17_max_trackings_per_run=_optional_int("TRACK17_MAX_TRACKINGS_PER_RUN", 0),
-        carrier_tracking_source=carrier_tracking_source,
         pipeline_mode=(os.getenv("PIPELINE_MODE", "auto").strip().lower() or "auto"),
         pipeline_enable_incremental=_env_bool("PIPELINE_ENABLE_INCREMENTAL", True),
         pipeline_enable_parity_check=_env_bool("PIPELINE_ENABLE_PARITY_CHECK", False),
         pipeline_state_tab=(os.getenv("PIPELINE_STATE_TAB", "PIPELINE_STATE").strip() or "PIPELINE_STATE"),
         pipeline_overlap_minutes=max(0, _optional_int("PIPELINE_OVERLAP_MINUTES", 10)),
         tracking_active_lookback_days=max(1, _optional_int("TRACKING_ACTIVE_LOOKBACK_DAYS", 30)),
-        payment_net_estimate=_env_bool("PAYMENT_NET_ESTIMATE", False),
-        payment_net_estimate_fees=_payment_net_estimate_fees(),
-        shop_report_timezone=_shop_report_timezone(),
     )

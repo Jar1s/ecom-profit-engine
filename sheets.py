@@ -7,7 +7,6 @@ import os
 import random
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from typing import TypeVar
 
 import gspread
@@ -22,7 +21,6 @@ from sheets_formatting import (
     apply_center_alignment,
     apply_data_column_widths,
     apply_data_conditional_formatting,
-    apply_orders_tab_number_formats,
     apply_summary_dashboard_format,
 )
 
@@ -66,32 +64,19 @@ def _inter_chunk_pause() -> None:
         time.sleep(sec)
 
 
-def _transient_sheet_http_status(status_code: int | None) -> bool:
-    """429 quota; 5xx often transient on Google's side (Sheets metadata open, reads, writes)."""
-    if status_code is None:
-        return False
-    if status_code == 429:
-        return True
-    return status_code in (500, 502, 503, 504)
-
-
 def _retry_sheet_api(fn: Callable[[], _T], *, what: str = "Sheets API") -> _T:
-    """Retry on HTTP 429 and transient 5xx (Google occasional internal errors)."""
+    """Retry on HTTP 429 (Sheets read/write quota per minute)."""
     max_attempts = 10
     for attempt in range(max_attempts):
         try:
             return fn()
         except gspread.exceptions.APIError as exc:
             sc = getattr(exc.response, "status_code", None)
-            if _transient_sheet_http_status(sc) and attempt < max_attempts - 1:
-                if sc == 429:
-                    delay = min(120.0, (2.0**attempt) * 1.25) + random.uniform(0.25, 1.5)
-                else:
-                    delay = min(90.0, (1.6**attempt) * 2.0) + random.uniform(0.2, 1.0)
+            if sc == 429 and attempt < max_attempts - 1:
+                delay = min(120.0, (2.0**attempt) * 1.25) + random.uniform(0.25, 1.5)
                 logger.warning(
-                    "%s HTTP %s, sleeping %.1fs [%s/%s]: %s",
+                    "%s rate limit (429), sleeping %.1fs [%s/%s]: %s",
                     what,
-                    sc or "?",
                     delay,
                     attempt + 1,
                     max_attempts,
@@ -158,23 +143,11 @@ def _open_spreadsheet(client: gspread.Client, settings: Settings) -> gspread.Spr
             "Or set GOOGLE_SHEET_ID or GOOGLE_SHEET_URL (full browser URL) and redeploy."
         ) from exc
     except gspread.exceptions.APIError as exc:
-        sc = getattr(exc.response, "status_code", None)
-        if sc in (500, 502, 503, 504):
-            hint = (
-                "Transient Google server error after retries — wait a minute and re-run the pipeline. "
-                "If it keeps happening, check https://www.google.com/appsstatus — not a missing API enable."
-            )
-        elif sc == 429:
-            hint = (
-                "Quota (429) after retries — increase SHEETS_PAUSE_BETWEEN_TABS_SECONDS or spread jobs; "
-                "share the spreadsheet with the service account (Editor)."
-            )
-        else:
-            hint = (
-                "Enable Sheets API (and Drive API if opening by name only) for the GCP project; "
-                "share the file with the service account (Editor)."
-            )
-        raise RuntimeError(f"Google Sheets API error: {exc}. {hint}") from exc
+        raise RuntimeError(
+            f"Google Sheets API error: {exc}. "
+            "Enable Sheets API (and Drive API if opening by name only) for the GCP project; "
+            "share the file with the service account."
+        ) from exc
 
 
 def get_or_create_supplier_costs_worksheet(
@@ -201,14 +174,28 @@ def get_or_create_supplier_costs_worksheet(
         return ws
 
 
-def worksheet_values_to_dataframe(
-    values: list[list[str]],
+def try_read_worksheet_dataframe(
+    settings: Settings,
     worksheet_title: str,
     *,
     required_headers: list[str] | tuple[str, ...] | None = None,
 ) -> pd.DataFrame | None:
-    """Turn raw A1 grid from Sheets into a DataFrame (same rules as try_read_worksheet_dataframe)."""
-    title = worksheet_title
+    """Read a tab as DataFrame, or None if missing / empty / error (non-fatal)."""
+    title = (worksheet_title or "").strip()
+    if not title:
+        return None
+    try:
+        client = _authorize(settings)
+        sh = _open_spreadsheet(client, settings)
+        ws = _retry_sheet_api(lambda: sh.worksheet(title), what="worksheet")
+    except Exception as exc:
+        logger.debug("Worksheet %r not available: %s", title, exc)
+        return None
+    try:
+        values = _retry_sheet_api(lambda: ws.get_all_values(), what="read")
+    except Exception as exc:
+        logger.warning("Could not read worksheet %r: %s", title, exc)
+        return None
     if not values or len(values) < 2:
         return None
     header_row_idx = 0
@@ -233,89 +220,11 @@ def worksheet_values_to_dataframe(
     return pd.DataFrame(rows, columns=header)
 
 
-def try_read_worksheet_dataframe(
-    settings: Settings,
-    worksheet_title: str,
-    *,
-    required_headers: list[str] | tuple[str, ...] | None = None,
-) -> pd.DataFrame | None:
-    """Read a tab as DataFrame, or None if missing / empty / error (non-fatal)."""
-    title = (worksheet_title or "").strip()
-    if not title:
-        return None
-    try:
-        client = _authorize(settings)
-        sh = _open_spreadsheet(client, settings)
-        ws = _retry_sheet_api(lambda: sh.worksheet(title), what="worksheet")
-    except Exception as exc:
-        logger.debug("Worksheet %r not available: %s", title, exc)
-        return None
-    try:
-        values = _retry_sheet_api(lambda: ws.get_all_values(), what="read")
-    except Exception as exc:
-        logger.warning("Could not read worksheet %r: %s", title, exc)
-        return None
-    return worksheet_values_to_dataframe(values, title, required_headers=required_headers)
-
-
-def read_dashboard_sheet_tabs(
-    settings: Settings,
-    specs: list[tuple[str, tuple[str, ...] | None]],
-) -> list[pd.DataFrame]:
-    """
-    Read several tabs with one OAuth + spreadsheet open, then parallel get_all_values.
-    Much faster than calling try_read_worksheet_dataframe once per tab (repeated open_by_key).
-    """
-    out: list[pd.DataFrame] = [pd.DataFrame() for _ in specs]
-    jobs: list[tuple[int, str, tuple[str, ...] | None]] = []
-    for i, (tab, req) in enumerate(specs):
-        t = (tab or "").strip()
-        if t:
-            jobs.append((i, t, req))
-    if not jobs:
-        return out
-
-    client = _authorize(settings)
-    sh = _open_spreadsheet(client, settings)
-    max_workers = max(
-        1,
-        min(
-            len(jobs),
-            int(os.getenv("DASHBOARD_SHEET_READ_CONCURRENCY", "10")),
-            16,
-        ),
-    )
-
-    def _read_job(job: tuple[int, str, tuple[str, ...] | None]) -> tuple[int, pd.DataFrame]:
-        idx, title, req = job
-        try:
-            ws = _retry_sheet_api(lambda: sh.worksheet(title), what="worksheet")
-            values = _retry_sheet_api(lambda: ws.get_all_values(), what="read")
-        except Exception as exc:
-            logger.debug("Worksheet %r not available: %s", title, exc)
-            return idx, pd.DataFrame()
-        df = worksheet_values_to_dataframe(values, title, required_headers=req)
-        if df is None:
-            return idx, pd.DataFrame()
-        return idx, df.copy()
-
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        results = list(ex.map(_read_job, jobs))
-    for idx, df in results:
-        out[idx] = df
-    return out
-
-
 def dataframe_to_values(df: pd.DataFrame) -> list[list[object]]:
     """2D list for gspread; NaN -> empty string."""
-    from normalize import SHEET_DATE_COLUMN_NAMES, sheet_date_to_iso
-
     filled = df.copy()
     for col in filled.columns:
-        if col in SHEET_DATE_COLUMN_NAMES:
-            filled[col] = filled[col].map(lambda x: "" if pd.isna(x) else sheet_date_to_iso(x))
-        else:
-            filled[col] = filled[col].apply(lambda x: "" if pd.isna(x) else x)
+        filled[col] = filled[col].apply(lambda x: "" if pd.isna(x) else x)
     header = filled.columns.tolist()
     rows = filled.values.tolist()
     return [header] + rows
@@ -364,7 +273,7 @@ def replace_worksheet_simple(
             c: list[list[object]] = chunk,
             rng: str = range_a1,
         ) -> None:
-            ws.update(c, rng, value_input_option="RAW")
+            ws.update(c, rng, value_input_option="USER_ENTERED")
 
         _retry_sheet_write(_write_chunk, what="update")
         _inter_chunk_pause()
@@ -475,9 +384,7 @@ def upload_dataframe(
             c: list[list[object]] = chunk,
             rng: str = range_a1,
         ) -> None:
-            # RAW keeps ISO Date/Shipped_Date strings as text. With USER_ENTERED,
-            # Sheets parses them as dates; later TEXT formatting can display serials.
-            ws.update(c, rng, value_input_option="RAW")
+            ws.update(c, rng, value_input_option="USER_ENTERED")
 
         _retry_sheet_write(_write_chunk, what="update")
         _inter_chunk_pause()
@@ -523,18 +430,6 @@ def upload_dataframe(
         ),
         what="format",
     )
-
-    if layout_kind in ("orders", "order_level"):
-        cols = list(df.columns)
-        _retry_sheet_write(
-            lambda: apply_orders_tab_number_formats(
-                ws,
-                header_row_1based=header_row,
-                num_sheet_rows=len(values),
-                columns=cols,
-            ),
-            what="format",
-        )
 
     logger.info(
         "Sheet %r: uploaded %s cell rows (header row=%s)",

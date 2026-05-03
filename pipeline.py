@@ -18,8 +18,6 @@ from config import Settings, load_settings
 from costs import load_cost_maps
 from data_quality import build_missing_supplier_costs_report, log_missing_supplier_costs
 from meta_ads import fetch_meta_campaign_insights, fetch_meta_daily_spend
-from normalize import SHEET_DATE_COLUMN_NAMES, sheet_date_to_iso
-from payment_net_estimate import apply_payment_net_estimate
 from pipeline_state import PipelineState, load_pipeline_state, save_pipeline_state, utc_now_iso
 from sheets import (
     pause_between_sheet_uploads,
@@ -29,9 +27,7 @@ from sheets import (
 )
 from shopify_auth import log_shopify_auth_config
 from shopify_client import fetch_all_orders, fetch_orders_and_line_rows, fetch_orders_by_ids
-from shopify_payouts import payment_net_by_order_id, payout_fee_rows, payout_fees_monthly
 from transform import (
-    ORDERS_DB_EMPTY_COLUMNS,
     daily_summary_from_orders,
     daily_summary_usd_primary,
     enrich_line_items,
@@ -40,8 +36,6 @@ from transform import (
     merge_daily_with_meta,
     meta_rows_for_daily_merge,
     order_level_summary,
-    reorder_order_level_columns,
-    reorder_orders_db_columns,
 )
 
 logging.basicConfig(
@@ -58,7 +52,6 @@ SHEET_META_DATA = os.getenv("SHEET_TAB_META_DATA", "META_DATA").strip()
 SHEET_META_CAMPAIGNS = os.getenv("SHEET_TAB_META_CAMPAIGNS", "META_CAMPAIGNS").strip()
 SHEET_DAILY = os.getenv("SHEET_TAB_DAILY_SUMMARY", "DAILY_SUMMARY").strip()
 SHEET_BOOKKEEPING = os.getenv("SHEET_TAB_BOOKKEEPING", "BOOKKEEPING").strip()
-SHEET_PAYOUTS_FEES = os.getenv("SHEET_TAB_PAYOUTS_FEES", "PAYOUTS_FEES").strip()
 
 _META_CAMPAIGN_COLUMNS = [
     "Date",
@@ -78,18 +71,25 @@ _META_CAMPAIGN_COLUMNS = [
     "Purchase_Value",
 ]
 
-_PAYOUTS_FEES_COLUMNS = [
+_ORDERS_DB_EMPTY_COLUMNS = [
     "Date",
-    "Payout_ID",
-    "Payout_Status",
-    "Currency",
-    "Transaction_ID",
-    "Transaction_Type",
-    "Source_Type",
-    "Source_Order_ID",
-    "Gross_Amount",
-    "Fee_Amount",
-    "Net_Amount",
+    "Order",
+    "Order_ID",
+    "Fulfillment_Status",
+    "Shipment_Status",
+    "Delivery_Status",
+    "Tracking_Numbers",
+    "Tracking_Companies",
+    "Carrier_Tracking_Status",
+    "Shipped_Date",
+    "Days_In_Transit",
+    "Line_Item_ID",
+    "Product",
+    "SKU",
+    "Quantity",
+    "Revenue",
+    "Product_Cost",
+    "Gross_Profit",
 ]
 
 
@@ -100,7 +100,6 @@ class PipelineArtifacts:
     daily_final: pd.DataFrame
     meta_df: pd.DataFrame
     meta_campaign_df: pd.DataFrame
-    payouts_fees_df: pd.DataFrame
     bookkeeping_df: pd.DataFrame
     missing_cost_df: pd.DataFrame
     shopify_orders: list[dict[str, Any]]
@@ -117,10 +116,10 @@ def _timed(phase: str, fn):
 
 def _runtime_budget_seconds() -> float:
     """
-    Soft guard before expensive steps so we fail with guidance instead of a hard platform kill.
+    Soft guard against hard platform timeout (e.g. Vercel 300s).
     PIPELINE_RUNTIME_BUDGET_SECONDS:
       - <= 0: disabled
-      - unset + Vercel runtime: defaults to 770s (~800s Pro max duration minus headroom)
+      - unset + Vercel runtime: defaults to 285s
       - unset outside Vercel: disabled
     """
     raw = (os.getenv("PIPELINE_RUNTIME_BUDGET_SECONDS") or "").strip()
@@ -132,25 +131,8 @@ def _runtime_budget_seconds() -> float:
             return 0.0
         return v if v > 0 else 0.0
     if (os.getenv("VERCEL") or "").strip() == "1":
-        return 770.0
+        return 285.0
     return 0.0
-
-
-def _skip_meta_campaign_sheet_upload(meta_campaign_df: pd.DataFrame, settings: Settings) -> bool:
-    """
-    When True, do not call upload_dataframe for META_CAMPAIGNS — keeps the existing Google Sheet tab.
-    Uploading an empty DataFrame clears the worksheet (see sheets.upload_dataframe), which made the
-    Meta campaigns tab look blank after failed/empty insights while META_DATA still had spend.
-    """
-    if not meta_campaign_df.empty:
-        return False
-    if settings.meta_campaign_insights:
-        logger.warning(
-            "META_CAMPAIGNS sheet upload skipped: zero campaign rows — leaving existing tab unchanged. "
-            "Daily META_DATA can still have spend; campaign breakdown failed or was empty "
-            "(check Meta insights logs; META_CONTINUE_ON_ERROR returns empty on insights failure)."
-        )
-    return True
 
 
 def _check_runtime_budget(
@@ -168,9 +150,8 @@ def _check_runtime_budget(
         raise RuntimeError(
             "runtime budget reached before step="
             f"{step} (elapsed={elapsed:.1f}s, budget={budget:.1f}s, remaining={remaining:.1f}s). "
-            "Raise or disable PIPELINE_RUNTIME_BUDGET_SECONDS (unset on Vercel defaults to 770s; set 0 to disable). "
-            "Lighten work: PIPELINE_MODE split, SHEETS_FANCY_LAYOUT=0, SHEETS_CONDITIONAL_FORMAT=0, "
-            "or increase Vercel Function Max Duration."
+            "Use PIPELINE_MODE=core/tracking/reporting, disable heavy sheets formatting "
+            "(SHEETS_FANCY_LAYOUT=0, SHEETS_CONDITIONAL_FORMAT=0), or increase function timeout."
         )
 
 
@@ -229,7 +210,7 @@ def _fetch_shopify_incremental(
 
 def _normalize_mode(settings: Settings) -> str:
     mode = settings.pipeline_mode.strip().lower()
-    return mode if mode in {"auto", "full", "business", "core", "tracking", "reporting"} else "auto"
+    return mode if mode in {"auto", "full", "core", "tracking", "reporting"} else "auto"
 
 
 def _parse_iso_dt(value: str) -> datetime | None:
@@ -255,17 +236,17 @@ def _is_sync_stale(last_sync_iso: str, *, minutes: int) -> bool:
 def _choose_auto_mode(state: PipelineState) -> str:
     """
     Autonomous rotation that avoids heavy full runs:
-    - business: frequent end-to-end business snapshot
+    - core: frequent refresh (default fallback)
     - tracking: less frequent shipment status refresh
-    - reporting: extra campaign/finance refresh roughly daily
+    - reporting: heavy bookkeeping/campaign refresh roughly daily
     """
     if _is_sync_stale(state.last_reporting_sync_at, minutes=24 * 60):
         return "reporting"
     if _is_sync_stale(state.last_tracking_sync_at, minutes=120):
         return "tracking"
     if _is_sync_stale(state.last_core_sync_at, minutes=30):
-        return "business"
-    return "business"
+        return "core"
+    return "core"
 
 
 def _updated_at_min_from_state(state: PipelineState, overlap_minutes: int) -> str | None:
@@ -286,7 +267,7 @@ def _extract_shopify_updated_at_max(orders: list[dict[str, Any]]) -> str:
 
 
 def _empty_orders_df() -> pd.DataFrame:
-    return pd.DataFrame(columns=ORDERS_DB_EMPTY_COLUMNS)
+    return pd.DataFrame(columns=_ORDERS_DB_EMPTY_COLUMNS)
 
 
 def _coerce_numeric(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
@@ -306,19 +287,9 @@ def _load_orders_db_df(settings: Settings) -> pd.DataFrame:
     if df is None or df.empty:
         return _empty_orders_df()
     out = df.copy()
-    out = out.drop(columns=["Refund_Ratio_pct", "Product_Cost_USD"], errors="ignore")
     out = _coerce_numeric(
         out,
-        [
-            "Order_ID",
-            "Line_Item_ID",
-            "Quantity",
-            "Revenue",
-            "Refunds_Total",
-            "Product_Cost",
-            "Gross_Profit",
-            "Days_In_Transit",
-        ],
+        ["Order_ID", "Line_Item_ID", "Quantity", "Revenue", "Product_Cost", "Gross_Profit", "Days_In_Transit"],
     )
     if "Order_ID" in out.columns:
         out["Order_ID"] = out["Order_ID"].astype("Int64")
@@ -326,9 +297,8 @@ def _load_orders_db_df(settings: Settings) -> pd.DataFrame:
         out["Line_Item_ID"] = out["Line_Item_ID"].astype("Int64")
     if "Quantity" in out.columns:
         out["Quantity"] = out["Quantity"].astype(float)
-    for _dcol in SHEET_DATE_COLUMN_NAMES:
-        if _dcol in out.columns:
-            out[_dcol] = out[_dcol].map(sheet_date_to_iso)
+    if "Date" in out.columns:
+        out["Date"] = out["Date"].astype(str)
     return out
 
 
@@ -349,24 +319,6 @@ def _load_meta_df(settings: Settings) -> pd.DataFrame:
     return out
 
 
-def _load_payouts_fees_df(settings: Settings) -> pd.DataFrame:
-    df = try_read_worksheet_dataframe(
-        settings,
-        SHEET_PAYOUTS_FEES,
-        required_headers=("Date", "Fee_Amount"),
-    )
-    if df is None:
-        return pd.DataFrame(columns=_PAYOUTS_FEES_COLUMNS)
-    out = df.copy()
-    for col in ("Gross_Amount", "Fee_Amount", "Net_Amount"):
-        if col in out.columns:
-            out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0.0).round(2)
-    for col in _PAYOUTS_FEES_COLUMNS:
-        if col not in out.columns:
-            out[col] = ""
-    return out[_PAYOUTS_FEES_COLUMNS].copy()
-
-
 def _merge_orders_df(existing: pd.DataFrame, changed: pd.DataFrame) -> pd.DataFrame:
     if existing.empty:
         return changed.copy()
@@ -384,21 +336,6 @@ def _merge_orders_df(existing: pd.DataFrame, changed: pd.DataFrame) -> pd.DataFr
 
 
 def _merge_meta_df(existing: pd.DataFrame, fresh: pd.DataFrame) -> pd.DataFrame:
-    def _drop_duplicate_columns(df: pd.DataFrame, label: str) -> pd.DataFrame:
-        if df.empty:
-            return df
-        if not df.columns.is_unique:
-            dupes = df.columns[df.columns.duplicated()].tolist()
-            logger.warning(
-                "META_DATA %s has duplicate columns; keeping first occurrence only: %s",
-                label,
-                ",".join(str(name) for name in dupes),
-            )
-            return df.loc[:, ~df.columns.duplicated()].copy()
-        return df
-
-    existing = _drop_duplicate_columns(existing, "existing frame")
-    fresh = _drop_duplicate_columns(fresh, "fresh frame")
     if existing.empty:
         return fresh.copy()
     if fresh.empty:
@@ -416,10 +353,9 @@ def _meta_frame_to_rows(meta_df: pd.DataFrame, settings: Settings) -> list[dict[
     if "Ad_Spend" in meta_df.columns:
         src = meta_df[["Date", "Ad_Spend"]].copy()
     elif "Ad_Spend_USD" in meta_df.columns:
-        # Keep USD here. :func:`transform.meta_rows_for_daily_merge` is the single place that
-        # converts Meta USD → shop currency when META_SPEND_IN_USD + USD_PER_LOCAL_UNIT (previously
-        # we divided here too, which double-converted and inflated DAILY_SUMMARY Ad_Spend).
         src = meta_df[["Date", "Ad_Spend_USD"]].rename(columns={"Ad_Spend_USD": "Ad_Spend"}).copy()
+        if settings.meta_spend_in_usd and settings.usd_per_local:
+            src["Ad_Spend"] = src["Ad_Spend"].astype(float) / float(settings.usd_per_local)
     else:
         return []
     src["Date"] = src["Date"].astype(str)
@@ -480,9 +416,6 @@ def _settings_for_tracking_mode(settings: Settings) -> Settings:
     return dc_replace(
         settings,
         meta_campaign_insights=False,
-        # Tracking runs are latency-sensitive (Vercel timeout risk). Keep table writes lightweight.
-        sheets_fancy_layout=False,
-        sheets_conditional_format=False,
     )
 
 
@@ -493,123 +426,6 @@ def _settings_for_reporting_mode(settings: Settings) -> Settings:
         shopify_fulfillment_enrich=False,
         shopify_graphql_fulfillment_verify=False,
     )
-
-
-def _settings_for_business_mode(settings: Settings) -> Settings:
-    return dc_replace(
-        settings,
-        # Business snapshot should include payouts/bookkeeping but avoid tracking-only overhead.
-        track17_api_key=None,
-    )
-
-
-def _daily_meta_rows_prefer_campaign_sum(
-    meta_rows_account: list[dict[str, Any]],
-    meta_campaign_df: pd.DataFrame,
-) -> list[dict[str, Any]]:
-    """
-    Per-day Ad_Spend for merge_daily_with_meta. When campaign×day insights exist, each day uses
-    sum(Ad_Spend) across campaigns — identical roll-up to the META_CAMPAIGNS sheet. Account-level
-    META_DATA can disagree with Meta Ads Manager; aggregating campaigns matches what merchants verify.
-
-    Dates only present in the account-level series (older history outside campaign fetch) keep
-    account spend.
-    """
-    if meta_campaign_df.empty:
-        return meta_rows_account
-    if "Date" not in meta_campaign_df.columns or "Ad_Spend" not in meta_campaign_df.columns:
-        return meta_rows_account
-    cdf = meta_campaign_df.copy()
-    cdf["Date"] = cdf["Date"].astype(str).str.strip()
-    cdf["Ad_Spend"] = pd.to_numeric(cdf["Ad_Spend"], errors="coerce").fillna(0.0)
-    campaign_daily = cdf.groupby("Date", as_index=False)["Ad_Spend"].sum()
-    by_campaign_day = {
-        str(row["Date"]).strip(): float(row["Ad_Spend"])
-        for _, row in campaign_daily.iterrows()
-    }
-    by_account_day = {
-        str(r.get("Date", "")).strip(): float(r.get("Ad_Spend") or 0)
-        for r in meta_rows_account
-        if str(r.get("Date", "")).strip()
-    }
-    all_dates = sorted(set(by_campaign_day) | set(by_account_day))
-    out: list[dict[str, Any]] = []
-    for d in all_dates:
-        if d in by_campaign_day:
-            spend = round(by_campaign_day[d], 2)
-        else:
-            spend = round(by_account_day.get(d, 0.0), 2)
-        out.append({"Date": d, "Ad_Spend": spend})
-    return out
-
-
-def _allocate_payment_net_by_line_revenue(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Split order-level payout ``Payment_Net`` across line items by ``Revenue`` share.
-
-    The ledger stores one net total per ``Order_ID``; attaching that full amount to every
-    line makes ``Payment_Net`` look larger than line ``Revenue`` / ``Gross_Profit``. After
-    lookup, each line gets ``order_net * line_revenue / sum(line_revenue)`` (rounded; drift
-    adjusted on the largest line). Orders with zero line revenue keep the full net on the
-    first line of the order.
-    """
-    if df.empty or "Order_ID" not in df.columns or "Payment_Net" not in df.columns:
-        return df
-    if "Revenue" not in df.columns:
-        return df
-    out = df.copy()
-    rev = pd.to_numeric(out["Revenue"], errors="coerce").fillna(0.0)
-    oid_series = out["Order_ID"]
-    net_dup = pd.to_numeric(out["Payment_Net"], errors="coerce").fillna(0.0)
-    order_net = net_dup.groupby(oid_series).transform("max")
-    sum_rev = rev.groupby(oid_series).transform("sum")
-    alloc = pd.Series(0.0, index=out.index, dtype=float)
-    pos = sum_rev > 0
-    alloc.loc[pos] = (order_net.loc[pos] * rev.loc[pos] / sum_rev.loc[pos]).round(2)
-    for _, grp in out.groupby("Order_ID", sort=False):
-        idx = grp.index
-        target = float(pd.to_numeric(grp["Payment_Net"], errors="coerce").fillna(0.0).iloc[0])
-        cur = float(alloc.loc[idx].sum())
-        drift = round(target - cur, 2)
-        if abs(drift) < 0.005:
-            continue
-        if float(alloc.loc[idx].sum()) == 0.0 and target != 0.0:
-            alloc.loc[idx[0]] = round(target, 2)
-            continue
-        sub = alloc.loc[idx]
-        j = sub.idxmax() if float(sub.sum()) > 0 else idx[0]
-        alloc.loc[j] = float(alloc.loc[j]) + drift
-    out["Payment_Net"] = alloc
-    return out
-
-
-def _apply_payment_net_to_orders_df(
-    df: pd.DataFrame,
-    payout_rows: list[dict[str, Any]] | None,
-) -> pd.DataFrame:
-    """Attach ``Payment_Net`` from Shopify Payments payout ledger (sum of ``Net`` per order)."""
-    if df.empty:
-        return df
-    out = df.copy()
-    if not payout_rows:
-        out["Payment_Net"] = 0.0
-        return out
-    net_map = payment_net_by_order_id(payout_rows)
-    if "Order_ID" not in out.columns:
-        out["Payment_Net"] = 0.0
-        return out
-    oids = pd.to_numeric(out["Order_ID"], errors="coerce")
-
-    def _lookup(v: Any) -> float:
-        if pd.isna(v):
-            return 0.0
-        try:
-            return float(net_map.get(int(v), 0.0))
-        except (TypeError, ValueError):
-            return 0.0
-
-    out["Payment_Net"] = oids.map(_lookup).round(2)
-    return _allocate_payment_net_by_line_revenue(out)
 
 
 def _build_meta_df(meta_rows: list[dict[str, Any]], settings: Settings) -> pd.DataFrame:
@@ -631,32 +447,17 @@ def _build_artifacts(
     shopify_orders: list[dict[str, Any]],
     meta_rows: list[dict[str, Any]],
     meta_campaign_rows: list[dict[str, Any]] | None,
-    payouts_fee_rows: list[dict[str, Any]] | None = None,
-    payouts_fees_existing_df: pd.DataFrame | None = None,
 ) -> PipelineArtifacts:
-    if payouts_fee_rows is not None:
-        payout_rows_for_net: list[dict[str, Any]] | None = payouts_fee_rows
-    elif payouts_fees_existing_df is not None and not payouts_fees_existing_df.empty:
-        payout_rows_for_net = payouts_fees_existing_df.to_dict("records")
-    else:
-        payout_rows_for_net = None
     orders_df = _timed(
         "enrich",
-        lambda: _apply_payment_net_to_orders_df(enrich_line_items(line_rows, cost_maps), payout_rows_for_net),
+        lambda: enrich_usd_columns(enrich_line_items(line_rows, cost_maps), settings.usd_per_local),
     )
-    orders_df = enrich_usd_columns(orders_df, settings.usd_per_local)
-    if settings.payment_net_estimate:
-        orders_df = apply_payment_net_estimate(orders_df, settings)
-    else:
-        orders_df = orders_df.drop(columns=["Payment_Net_Estimate"], errors="ignore")
-    orders_df = reorder_orders_db_columns(orders_df)
     order_df = _timed(
         "order_level",
-        lambda: reorder_order_level_columns(
-            enrich_usd_columns(order_level_summary(orders_df), settings.usd_per_local)
-        ),
+        lambda: enrich_usd_columns(order_level_summary(orders_df), settings.usd_per_local),
     )
     daily_df = _timed("daily", lambda: daily_summary_from_orders(orders_df))
+    meta_df = _timed("meta_transform", lambda: _build_meta_df(meta_rows, settings))
     meta_campaign_df = pd.DataFrame()
     if meta_campaign_rows is not None:
         meta_campaign_df = _timed(
@@ -667,19 +468,6 @@ def _build_artifacts(
                 meta_spend_in_usd=settings.meta_spend_in_usd,
             ),
         )
-
-    meta_for_daily = meta_rows
-    if settings.daily_meta_from_campaign_sum and not meta_campaign_df.empty:
-        meta_for_daily = _daily_meta_rows_prefer_campaign_sum(meta_rows, meta_campaign_df)
-        logger.info(
-            "META_DATA + daily merge: campaign×day spend sums (%s distinct dates) — aligns with META_CAMPAIGNS",
-            meta_campaign_df["Date"].astype(str).str.strip().nunique()
-            if "Date" in meta_campaign_df.columns
-            else 0,
-        )
-
-    meta_df = _timed("meta_transform", lambda: _build_meta_df(meta_for_daily, settings))
-
     if settings.meta_spend_in_usd and not settings.usd_per_local:
         logger.warning(
             "META_SPEND_IN_USD=1 but USD_PER_LOCAL_UNIT is unset: "
@@ -687,40 +475,19 @@ def _build_artifacts(
         )
     logger.info("Merging daily summary with Meta spend …")
     meta_for_merge = meta_rows_for_daily_merge(
-        meta_for_daily,
+        meta_rows,
         meta_spend_in_usd=settings.meta_spend_in_usd,
         usd_per_local=settings.usd_per_local,
     )
     daily_final = _timed(
         "merge_meta",
-        lambda: enrich_usd_columns(
-            merge_daily_with_meta(daily_df, meta_for_merge),
-            settings.usd_per_local,
-            include_refunds_usd=True,
-        ),
+        lambda: enrich_usd_columns(merge_daily_with_meta(daily_df, meta_for_merge), settings.usd_per_local),
     )
     if settings.daily_summary_usd_primary:
         daily_final = daily_summary_usd_primary(daily_final)
-    if payouts_fee_rows is not None:
-        payouts_fees_df = pd.DataFrame(payouts_fee_rows)
-    elif payouts_fees_existing_df is not None:
-        payouts_fees_df = payouts_fees_existing_df.copy()
-    else:
-        payouts_fees_df = pd.DataFrame(columns=_PAYOUTS_FEES_COLUMNS)
-    for c in _PAYOUTS_FEES_COLUMNS:
-        if c not in payouts_fees_df.columns:
-            payouts_fees_df[c] = ""
-    payouts_fees_df = payouts_fees_df[_PAYOUTS_FEES_COLUMNS].copy()
-    payouts_fees_monthly_df = payout_fees_monthly(payouts_fees_df)
     bookkeeping_df = _timed(
         "bookkeeping",
-        lambda: bookkeeping_us_monthly(
-            shopify_orders,
-            orders_df,
-            daily_final,
-            payout_fees_monthly_df=payouts_fees_monthly_df,
-            shop_report_timezone=settings.shop_report_timezone,
-        ),
+        lambda: bookkeeping_us_monthly(shopify_orders, orders_df, daily_final),
     )
     missing_cost_df = build_missing_supplier_costs_report(orders_df)
     return PipelineArtifacts(
@@ -729,7 +496,6 @@ def _build_artifacts(
         daily_final=daily_final,
         meta_df=meta_df,
         meta_campaign_df=meta_campaign_df,
-        payouts_fees_df=payouts_fees_df,
         bookkeeping_df=bookkeeping_df,
         missing_cost_df=missing_cost_df,
         shopify_orders=shopify_orders,
@@ -815,7 +581,7 @@ def _upload_reporting_tabs(settings: Settings, artifacts: PipelineArtifacts, *, 
         estimate=10.0,
     )
     pause_between_sheet_uploads()
-    if not _skip_meta_campaign_sheet_upload(artifacts.meta_campaign_df, settings):
+    if not artifacts.meta_campaign_df.empty or settings.meta_campaign_insights:
         _run_step(
             "sheet_meta_campaigns",
             lambda: upload_dataframe(
@@ -827,17 +593,6 @@ def _upload_reporting_tabs(settings: Settings, artifacts: PipelineArtifacts, *, 
             estimate=10.0,
         )
         pause_between_sheet_uploads()
-    _run_step(
-        "sheet_payouts_fees",
-        lambda: upload_dataframe(
-            settings,
-            artifacts.payouts_fees_df,
-            SHEET_PAYOUTS_FEES,
-            layout_kind="payouts",
-        ),
-        estimate=10.0,
-    )
-    pause_between_sheet_uploads()
     _run_step(
         "sheet_bookkeeping",
         lambda: upload_dataframe(settings, artifacts.bookkeeping_df, SHEET_BOOKKEEPING, layout_kind="bookkeeping"),
@@ -852,7 +607,7 @@ def _upload_full_tabs(settings: Settings, artifacts: PipelineArtifacts, *, start
 
     _upload_core_tabs(settings, artifacts, started_total=started_total)
     pause_between_sheet_uploads()
-    if not _skip_meta_campaign_sheet_upload(artifacts.meta_campaign_df, settings):
+    if settings.meta_campaign_insights:
         _run_step(
             "sheet_meta_campaigns",
             lambda: upload_dataframe(
@@ -864,88 +619,6 @@ def _upload_full_tabs(settings: Settings, artifacts: PipelineArtifacts, *, start
             estimate=10.0,
         )
         pause_between_sheet_uploads()
-    _run_step(
-        "sheet_payouts_fees",
-        lambda: upload_dataframe(
-            settings,
-            artifacts.payouts_fees_df,
-            SHEET_PAYOUTS_FEES,
-            layout_kind="payouts",
-        ),
-        estimate=10.0,
-    )
-    pause_between_sheet_uploads()
-    _run_step(
-        "sheet_bookkeeping",
-        lambda: upload_dataframe(settings, artifacts.bookkeeping_df, SHEET_BOOKKEEPING, layout_kind="bookkeeping"),
-        estimate=10.0,
-    )
-
-
-def _upload_business_tabs(settings: Settings, artifacts: PipelineArtifacts, *, started_total: float) -> None:
-    def _run_step(step: str, fn, *, estimate: float = 0.0) -> None:
-        _check_runtime_budget(started_total, step=step, estimated_seconds=estimate)
-        _timed(step, fn)
-
-    log_missing_supplier_costs(
-        artifacts.orders_df,
-        artifacts.missing_cost_df,
-        sheet_tab=settings.missing_supplier_costs_tab,
-    )
-    if settings.missing_supplier_costs_tab:
-        _run_step(
-            "sheet_missing_supplier_costs",
-            lambda: replace_worksheet_simple(settings, settings.missing_supplier_costs_tab, artifacts.missing_cost_df),
-            estimate=3.0,
-        )
-        pause_between_sheet_uploads()
-    _run_step(
-        "sheet_orders_db",
-        lambda: upload_dataframe(settings, artifacts.orders_df, SHEET_ORDERS_DB, layout_kind="orders"),
-        estimate=20.0,
-    )
-    pause_between_sheet_uploads()
-    _run_step(
-        "sheet_order_level",
-        lambda: upload_dataframe(settings, artifacts.order_df, SHEET_ORDER_LEVEL, layout_kind="order_level"),
-        estimate=20.0,
-    )
-    pause_between_sheet_uploads()
-    _run_step(
-        "sheet_meta_data",
-        lambda: upload_dataframe(settings, artifacts.meta_df, SHEET_META_DATA, layout_kind="meta"),
-        estimate=10.0,
-    )
-    pause_between_sheet_uploads()
-    _run_step(
-        "sheet_daily_summary",
-        lambda: upload_dataframe(settings, artifacts.daily_final, SHEET_DAILY, layout_kind="daily"),
-        estimate=10.0,
-    )
-    pause_between_sheet_uploads()
-    if not _skip_meta_campaign_sheet_upload(artifacts.meta_campaign_df, settings):
-        _run_step(
-            "sheet_meta_campaigns",
-            lambda: upload_dataframe(
-                settings,
-                artifacts.meta_campaign_df,
-                SHEET_META_CAMPAIGNS,
-                layout_kind="meta_campaigns",
-            ),
-            estimate=10.0,
-        )
-        pause_between_sheet_uploads()
-    _run_step(
-        "sheet_payouts_fees",
-        lambda: upload_dataframe(
-            settings,
-            artifacts.payouts_fees_df,
-            SHEET_PAYOUTS_FEES,
-            layout_kind="payouts",
-        ),
-        estimate=10.0,
-    )
-    pause_between_sheet_uploads()
     _run_step(
         "sheet_bookkeeping",
         lambda: upload_dataframe(settings, artifacts.bookkeeping_df, SHEET_BOOKKEEPING, layout_kind="bookkeeping"),
@@ -972,12 +645,6 @@ def _update_state_after_success(
     )
     if mode == "core":
         next_state = dc_replace(next_state, last_core_sync_at=now)
-    elif mode == "business":
-        next_state = dc_replace(
-            next_state,
-            last_core_sync_at=now,
-            last_reporting_sync_at=now,
-        )
     elif mode == "tracking":
         next_state = dc_replace(next_state, last_tracking_sync_at=now)
     elif mode == "reporting":
@@ -998,7 +665,7 @@ def _save_state_error(settings: Settings, state: PipelineState, mode: str, exc: 
         save_pipeline_state(settings, dc_replace(state, last_error_summary=summary))
     except Exception as save_exc:
         logger.warning(
-            "Could not write PIPELINE_STATE after pipeline failure (quota, transient Sheets 5xx, or API); "
+            "Could not write PIPELINE_STATE after pipeline failure (quota or API); "
             "original error is still raised below: %s",
             save_exc,
         )
@@ -1006,18 +673,16 @@ def _save_state_error(settings: Settings, state: PipelineState, mode: str, exc: 
 
 def _run_full(settings: Settings, cost_maps) -> PipelineArtifacts:
     log_shopify_auth_config(settings)
-    max_workers = 4 if settings.meta_campaign_insights else 3
+    max_workers = 3 if settings.meta_campaign_insights else 2
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         shopify_future = executor.submit(_fetch_shopify_full, settings)
         meta_future = executor.submit(_fetch_meta_daily_safe, settings)
         meta_campaign_future = (
             executor.submit(_fetch_meta_campaigns_safe, settings) if settings.meta_campaign_insights else None
         )
-        payouts_future = executor.submit(payout_fee_rows, settings)
         shopify_orders, line_rows = shopify_future.result()
         meta_rows = meta_future.result()
         meta_campaign_rows = meta_campaign_future.result() if meta_campaign_future else None
-        payout_rows = payouts_future.result()
     meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
     return _build_artifacts(
         settings,
@@ -1026,7 +691,6 @@ def _run_full(settings: Settings, cost_maps) -> PipelineArtifacts:
         shopify_orders=shopify_orders,
         meta_rows=meta_rows,
         meta_campaign_rows=meta_campaign_rows,
-        payouts_fee_rows=payout_rows,
     )
 
 
@@ -1038,13 +702,11 @@ def _run_core(settings: Settings, cost_maps, state: PipelineState) -> PipelineAr
     settings_core = _settings_for_core_mode(settings)
     log_shopify_auth_config(settings_core)
     updated_at_min = _updated_at_min_from_state(state, settings.pipeline_overlap_minutes)
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         shopify_future = executor.submit(_fetch_shopify_incremental, settings_core, updated_at_min=updated_at_min)
         meta_future = executor.submit(_fetch_meta_daily_safe, settings)
-        payouts_future = executor.submit(payout_fee_rows, settings)
         changed_orders, changed_rows = shopify_future.result()
         meta_rows = meta_future.result()
-        payout_rows = payouts_future.result()
     meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
     merged_orders_df = _merge_orders_df(
         existing_orders_df,
@@ -1058,7 +720,6 @@ def _run_core(settings: Settings, cost_maps, state: PipelineState) -> PipelineAr
         shopify_orders=changed_orders,
         meta_rows=meta_rows,
         meta_campaign_rows=None,
-        payouts_fee_rows=payout_rows,
     )
 
 
@@ -1079,16 +740,15 @@ def _run_tracking(settings: Settings, cost_maps, state: PipelineState) -> Pipeli
             shopify_orders=[],
             meta_rows=meta_rows,
             meta_campaign_rows=None,
-            payouts_fees_existing_df=_load_payouts_fees_df(settings),
         )
     settings_tracking = _settings_for_tracking_mode(settings)
     log_shopify_auth_config(settings_tracking)
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         orders_future = executor.submit(fetch_orders_by_ids, settings_tracking, candidate_ids)
+        meta_future = executor.submit(_fetch_meta_daily_safe, settings)
         raw_orders = orders_future.result()
-    # Tracking mode refreshes shipment/delivery fields only; reuse existing META_DATA
-    # so expired Meta tokens do not break/slow tracking cron runs.
-    meta_rows = _meta_frame_to_rows(_load_meta_df(settings), settings)
+        meta_rows = meta_future.result()
+    meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
     refreshed_orders, refreshed_rows = fetch_orders_and_line_rows(settings_tracking, orders=raw_orders)
     merged_orders_df = _merge_orders_df(
         existing_orders_df,
@@ -1101,7 +761,6 @@ def _run_tracking(settings: Settings, cost_maps, state: PipelineState) -> Pipeli
         shopify_orders=refreshed_orders,
         meta_rows=meta_rows,
         meta_campaign_rows=None,
-        payouts_fees_existing_df=_load_payouts_fees_df(settings),
     )
 
 
@@ -1111,15 +770,13 @@ def _run_reporting(settings: Settings, cost_maps, state: PipelineState) -> Pipel
         logger.info("Reporting mode fallback -> full rebuild (missing ORDERS_DB)")
         return _run_full(settings, cost_maps)
     settings_reporting = _settings_for_reporting_mode(settings)
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         shopify_future = executor.submit(_timed, "shopify_fetch", lambda: fetch_all_orders(settings_reporting))
         meta_future = executor.submit(_fetch_meta_daily_safe, settings)
         meta_campaign_future = executor.submit(_fetch_meta_campaigns_safe, settings)
-        payouts_future = executor.submit(payout_fee_rows, settings_reporting)
         shopify_orders = shopify_future.result()
         meta_rows = meta_future.result()
         meta_campaign_rows = meta_campaign_future.result()
-        payout_rows = payouts_future.result()
     meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
     return _build_artifacts(
         settings,
@@ -1128,66 +785,16 @@ def _run_reporting(settings: Settings, cost_maps, state: PipelineState) -> Pipel
         shopify_orders=shopify_orders,
         meta_rows=meta_rows,
         meta_campaign_rows=meta_campaign_rows,
-        payouts_fee_rows=payout_rows,
-    )
-
-
-def _run_business(settings: Settings, cost_maps, state: PipelineState) -> PipelineArtifacts:
-    existing_orders_df = _load_orders_db_df(settings)
-    settings_business = _settings_for_business_mode(settings)
-    log_shopify_auth_config(settings_business)
-    updated_at_min = _updated_at_min_from_state(state, settings.pipeline_overlap_minutes)
-    can_incremental = (not existing_orders_df.empty) and bool(state.shopify_orders_updated_at_max)
-
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        if can_incremental:
-            shopify_future = executor.submit(
-                _fetch_shopify_incremental,
-                settings_business,
-                updated_at_min=updated_at_min,
-            )
-        else:
-            logger.info("Business mode bootstrap fallback -> full Shopify fetch")
-            shopify_future = executor.submit(_fetch_shopify_full, settings_business)
-        meta_future = executor.submit(_fetch_meta_daily_safe, settings)
-        meta_campaign_future = (
-            executor.submit(_fetch_meta_campaigns_safe, settings)
-            if settings.meta_campaign_insights
-            else None
-        )
-        payouts_future = executor.submit(payout_fee_rows, settings_business)
-        shopify_orders, line_rows = shopify_future.result()
-        meta_rows = meta_future.result()
-        meta_campaign_rows = meta_campaign_future.result() if meta_campaign_future else None
-        payout_rows = payouts_future.result()
-
-    meta_rows = _merge_meta_rows_with_existing(settings, meta_rows)
-    if can_incremental:
-        changed_rows = line_rows
-        merged_orders_df = _merge_orders_df(
-            existing_orders_df,
-            enrich_usd_columns(enrich_line_items(changed_rows, cost_maps), settings.usd_per_local),
-        )
-        line_rows = merged_orders_df.to_dict(orient="records")
-    return _build_artifacts(
-        settings,
-        cost_maps,
-        line_rows=line_rows,
-        shopify_orders=shopify_orders,
-        meta_rows=meta_rows,
-        meta_campaign_rows=meta_campaign_rows,
-        payouts_fee_rows=payout_rows,
     )
 
 
 def _log_completion(artifacts: PipelineArtifacts, started_total: float) -> None:
     logger.info(
-        "Done. Line rows=%s, order rows=%s, meta days=%s, campaign rows=%s, payouts rows=%s, daily rows=%s, bookkeeping months=%s",
+        "Done. Line rows=%s, order rows=%s, meta days=%s, campaign rows=%s, daily rows=%s, bookkeeping months=%s",
         len(artifacts.orders_df),
         len(artifacts.order_df),
         len(artifacts.meta_df),
         len(artifacts.meta_campaign_df),
-        len(artifacts.payouts_fees_df),
         len(artifacts.daily_final),
         len(artifacts.bookkeeping_df),
     )
@@ -1225,13 +832,6 @@ def _run_parity_check(settings: Settings, cost_maps, state: PipelineState, mode:
         baseline = _run_reporting(settings, cost_maps, state)
         _ensure_frame_equal("META_DATA", actual.meta_df, baseline.meta_df, ["Date"])
         _ensure_frame_equal("META_CAMPAIGNS", actual.meta_campaign_df, baseline.meta_campaign_df, ["Date", "Campaign_ID"])
-        _ensure_frame_equal("BOOKKEEPING", actual.bookkeeping_df, baseline.bookkeeping_df, ["Month"])
-    elif mode == "business":
-        baseline = _run_business(settings, cost_maps, state)
-        _ensure_frame_equal("ORDERS_DB", actual.orders_df, baseline.orders_df, ["Line_Item_ID"])
-        _ensure_frame_equal("ORDER_LEVEL", actual.order_df, baseline.order_df, ["Order_ID"])
-        _ensure_frame_equal("DAILY_SUMMARY", actual.daily_final, baseline.daily_final, ["Date"])
-        _ensure_frame_equal("META_DATA", actual.meta_df, baseline.meta_df, ["Date"])
         _ensure_frame_equal("BOOKKEEPING", actual.bookkeeping_df, baseline.bookkeeping_df, ["Month"])
     else:
         baseline = _run_full(settings, cost_maps)
@@ -1283,7 +883,7 @@ def main(mode_override: str | None = None, run_overrides: dict[str, Any] | None 
     started_total = time.perf_counter()
     state = load_pipeline_state(settings)
     mode = (mode_override or _normalize_mode(settings)).strip().lower()
-    if mode not in {"auto", "full", "business", "core", "tracking", "reporting"}:
+    if mode not in {"auto", "full", "core", "tracking", "reporting"}:
         mode = "auto"
     if mode == "auto":
         mode = _choose_auto_mode(state)
@@ -1309,12 +909,6 @@ def main(mode_override: str | None = None, run_overrides: dict[str, Any] | None 
             phase = "sheets"
             logger.info("Uploading to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
             _timed("sheets", lambda: _upload_full_tabs(settings, artifacts, started_total=started_total))
-        elif mode == "business":
-            phase = "business"
-            artifacts = _run_business(settings, cost_maps, state)
-            phase = "sheets_business"
-            logger.info("Uploading business tabs to Google Sheets %r …", settings.google_sheet_id or settings.google_sheet_name)
-            _timed("sheets", lambda: _upload_business_tabs(settings, artifacts, started_total=started_total))
         elif mode == "core":
             if not settings.pipeline_enable_incremental:
                 logger.info("Core mode requested but PIPELINE_ENABLE_INCREMENTAL=0 -> fallback to full mode")
@@ -1356,12 +950,6 @@ def main(mode_override: str | None = None, run_overrides: dict[str, Any] | None 
             mode=mode,
             shopify_updated_at_max=artifacts.shopify_updated_at_max,
         )
-        try:
-            from api.dashboard import clear_dashboard_bundle_cache
-
-            clear_dashboard_bundle_cache()
-        except Exception:
-            pass
         _log_completion(artifacts, started_total)
         return 0
     except Exception as exc:

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import logging
-import math
 import os
-import re
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,58 +22,6 @@ if TYPE_CHECKING:
     from config import Settings
 
 logger = logging.getLogger(__name__)
-
-_NON_NUMERIC_COST_TAIL = re.compile(r"[^\d.,\-]+$")
-
-
-def _sheet_header_key(raw: object) -> str:
-    """Lowercase header for column detection (strip BOM / ZWSP from pasted Sheets headers)."""
-    return str(raw).strip().strip("\ufeff\u200b").lower()
-
-
-def parse_supplier_cost_value(raw: object) -> float:
-    """
-    Parse a Cost cell from CSV or Google Sheets into a float.
-
-    Sheets/Excel often yield strings like ``12,50``, ``$19.99``, ``1.234,56`` — plain
-    ``float()`` would fail and previously fell through to **0**, which drops every
-    product from lineage matching and looks like “missing supplier costs”.
-    """
-    if raw is None:
-        return 0.0
-    if isinstance(raw, bool):
-        return 0.0
-    if isinstance(raw, (int, float)):
-        if isinstance(raw, float) and (math.isnan(raw) or math.isinf(raw)):
-            return 0.0
-        return float(raw)
-    s = str(raw).strip()
-    if not s or s.lower() in ("nan", "none", "-", "—", "–"):
-        return 0.0
-    for sym in "$€£¥₹₽\u00a0":
-        s = s.replace(sym, "")
-    s = s.replace(" ", "").strip()
-    s = _NON_NUMERIC_COST_TAIL.sub("", s)
-    if not s:
-        return 0.0
-    if "," in s and "." in s:
-        last_comma = s.rfind(",")
-        last_dot = s.rfind(".")
-        if last_comma > last_dot:
-            s = s.replace(".", "").replace(",", ".")
-        else:
-            s = s.replace(",", "")
-    elif "," in s:
-        parts = s.split(",")
-        if len(parts) == 2 and len(parts[1]) <= 2 and parts[1].isdigit():
-            int_part, frac = parts
-            s = int_part.replace(".", "") + "." + frac
-        else:
-            s = s.replace(",", "")
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
 
 
 @dataclass(frozen=True)
@@ -116,7 +62,7 @@ def build_product_lineage_index(by_product: dict[str, float]) -> dict[str, float
 
 def _cost_maps_from_dataframe(df: pd.DataFrame, *, source: str) -> CostMaps:
     """Build maps from Product + Cost and optional SKU (case-insensitive headers)."""
-    col_lower = {_sheet_header_key(c): c for c in df.columns}
+    col_lower = {str(c).strip().lower(): c for c in df.columns}
     if "product" not in col_lower or "cost" not in col_lower:
         raise ValueError(
             f"{source}: need columns Product and Cost (any casing). Got: {list(df.columns)}"
@@ -135,39 +81,26 @@ def _cost_maps_from_dataframe(df: pd.DataFrame, *, source: str) -> CostMaps:
 
     by_product: dict[str, float] = {}
     by_sku: dict[str, float] = {}
-    sku_only_rows = 0
     for _, row in use.iterrows():
         raw_name = str(row.get("Product", "") or "").strip()
         key = normalize_product_name(raw_name)
-        cost = parse_supplier_cost_value(row.get("Cost", 0))
+        if not key:
+            continue
+        try:
+            cost = float(row.get("Cost", 0) or 0)
+        except (TypeError, ValueError):
+            cost = 0.0
+        if key in by_product:
+            logger.warning("Duplicate cost row for normalized key %r — last wins", key)
+        by_product[key] = cost
         raw_sku = str(row.get("SKU", "") or "").strip()
-        sk = normalize_sku(raw_sku) if raw_sku else ""
-
-        if key:
-            if key in by_product:
-                logger.warning("Duplicate cost row for normalized key %r — last wins", key)
-            by_product[key] = cost
-            if sk:
-                if sk in by_sku and by_sku[sk] != cost:
-                    logger.warning(
-                        "Duplicate SKU %r with different costs in %s — last wins", sk, source
-                    )
-                by_sku[sk] = cost
-        elif sk:
-            sku_only_rows += 1
+        if raw_sku:
+            sk = normalize_sku(raw_sku)
             if sk in by_sku and by_sku[sk] != cost:
                 logger.warning(
                     "Duplicate SKU %r with different costs in %s — last wins", sk, source
                 )
             by_sku[sk] = cost
-        # else: empty product + empty SKU — skip
-
-    if sku_only_rows:
-        logger.info(
-            "Supplier costs %s: %s row(s) with SKU only (no Product title) — registered on by_sku",
-            source,
-            sku_only_rows,
-        )
 
     lineage = build_product_lineage_index(by_product)
     logger.info(

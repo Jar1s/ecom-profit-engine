@@ -12,35 +12,13 @@ from transform import (
     daily_summary_usd_primary,
     enrich_line_items,
     enrich_meta_usd_columns,
-    enrich_usd_columns,
     merge_daily_with_meta,
     meta_rows_for_daily_merge,
     order_level_summary,
-    reorder_order_level_columns,
-    reorder_orders_db_columns,
 )
 
 
 class TestTransform(unittest.TestCase):
-    def test_reorder_orders_db_columns(self) -> None:
-        df = pd.DataFrame(
-            [
-                {
-                    "Shipped_Date": "2026-04-02",
-                    "Date": "2026-04-01",
-                    "Revenue": 10.0,
-                    "SKU": "S-1",
-                    "Revenue_USD": 6.5,
-                    "Future_Column_X": 1,
-                }
-            ]
-        )
-        out = reorder_orders_db_columns(df)
-        self.assertEqual(
-            list(out.columns),
-            ["Date", "Revenue_USD", "Revenue", "Shipped_Date", "SKU", "Future_Column_X"],
-        )
-
     def test_enrich_line_items(self) -> None:
         rows = [
             {
@@ -78,53 +56,6 @@ class TestTransform(unittest.TestCase):
         )
         df = enrich_line_items(rows, cost_maps)
         self.assertEqual(df.loc[0, "Product_Cost"], 22.9)
-
-    def test_enrich_line_items_prefers_sku_over_broader_product_lineage(self) -> None:
-        """Supplier SKU row should beat a shorter Product key that matches via title stripping."""
-        rows = [
-            {
-                "Date": "2026-04-01",
-                "Order": "#1",
-                "Order_ID": 1,
-                "Line_Item_ID": 10,
-                "Product": "Model - Red",
-                "SKU": "SKU-EXACT-1",
-                "Quantity": 1,
-                "Revenue": 50.0,
-            }
-        ]
-        bp = {normalize_product_name("Model"): 5.0}
-        lineage = build_product_lineage_index(bp)
-        cost_maps = CostMaps(
-            by_product=bp,
-            by_sku={"SKU-EXACT-1": 25.0},
-            by_product_lineage=lineage,
-        )
-        df = enrich_line_items(rows, cost_maps)
-        self.assertEqual(df.loc[0, "Product_Cost"], 25.0)
-
-    def test_enrich_line_items_prefers_exact_product_over_sku(self) -> None:
-        """Ručne kurátorovaný presný Product match nemá prebiť SKU z iného supplier riadku."""
-        rows = [
-            {
-                "Date": "2026-04-01",
-                "Order": "#1",
-                "Order_ID": 1,
-                "Line_Item_ID": 10,
-                "Product": "Exact Shopify Title",
-                "SKU": "DUP-SKU",
-                "Quantity": 1,
-                "Revenue": 50.0,
-            }
-        ]
-        bp = {normalize_product_name("Exact Shopify Title"): 15.0}
-        cost_maps = CostMaps(
-            by_product=bp,
-            by_sku={"DUP-SKU": 99.0},
-            by_product_lineage=build_product_lineage_index(bp),
-        )
-        df = enrich_line_items(rows, cost_maps)
-        self.assertEqual(df.loc[0, "Product_Cost"], 15.0)
 
     def test_enrich_line_items_sku_prefix_same_model_other_color(self) -> None:
         """ITEM_CATALOG style: one wholesale row for FCGP42825 covers all FCGP42825.* variants."""
@@ -231,7 +162,6 @@ class TestTransform(unittest.TestCase):
                     "Product": "A",
                     "Quantity": 1,
                     "Revenue": 10.0,
-                    "Refunds_Total": 7.5,
                     "Product_Cost": 4.0,
                     "Gross_Profit": 6.0,
                 },
@@ -243,7 +173,6 @@ class TestTransform(unittest.TestCase):
                     "Product": "B",
                     "Quantity": 1,
                     "Revenue": 5.0,
-                    "Refunds_Total": 7.5,
                     "Product_Cost": 2.0,
                     "Gross_Profit": 3.0,
                 },
@@ -252,76 +181,8 @@ class TestTransform(unittest.TestCase):
         out = order_level_summary(df)
         self.assertEqual(len(out), 1)
         self.assertEqual(out.loc[0, "Revenue"], 15.0)
-        self.assertEqual(out.loc[0, "Refunds_Total"], 7.5)
-        self.assertEqual(out.loc[0, "Net_Revenue_After_Refunds"], 7.5)
         self.assertEqual(out.loc[0, "Product_Cost"], 6.0)
         self.assertEqual(out.loc[0, "Gross_Profit"], 9.0)
-        self.assertEqual(out.loc[0, "Gross_Profit_After_Refunds"], 1.5)
-
-    def test_reorder_order_level_columns_puts_usd_before_revenue(self) -> None:
-        df = pd.DataFrame(
-            [
-                {
-                    "Date": "2026-04-01",
-                    "Order": "#1",
-                    "Order_ID": 1,
-                    "Revenue": 100.0,
-                    "Product_Cost": 40.0,
-                    "Gross_Profit": 60.0,
-                    "Revenue_USD": 65.0,
-                    "Gross_Profit_USD": 39.0,
-                    "Future_Column_X": "x",
-                }
-            ]
-        )
-        out = reorder_order_level_columns(df)
-        self.assertEqual(
-            list(out.columns),
-            [
-                "Date",
-                "Order",
-                "Order_ID",
-                "Revenue_USD",
-                "Revenue",
-                "Product_Cost",
-                "Gross_Profit_USD",
-                "Gross_Profit",
-                "Future_Column_X",
-            ],
-        )
-
-    def test_order_level_summary_payment_net_sums_line_shares(self) -> None:
-        df = pd.DataFrame(
-            [
-                {
-                    "Date": "2026-04-01",
-                    "Order": "#1",
-                    "Order_ID": 1,
-                    "Line_Item_ID": 1,
-                    "Product": "A",
-                    "Quantity": 1,
-                    "Revenue": 10.0,
-                    "Product_Cost": 4.0,
-                    "Gross_Profit": 6.0,
-                    "Payment_Net": 6.33,
-                },
-                {
-                    "Date": "2026-04-01",
-                    "Order": "#1",
-                    "Order_ID": 1,
-                    "Line_Item_ID": 2,
-                    "Product": "B",
-                    "Quantity": 1,
-                    "Revenue": 5.0,
-                    "Product_Cost": 2.0,
-                    "Gross_Profit": 3.0,
-                    "Payment_Net": 3.17,
-                },
-            ]
-        )
-        out = order_level_summary(df)
-        self.assertEqual(len(out), 1)
-        self.assertAlmostEqual(out.loc[0, "Payment_Net"], 9.5, places=2)
 
     def test_order_level_summary_with_shipping_columns(self) -> None:
         df = pd.DataFrame(
@@ -383,33 +244,6 @@ class TestTransform(unittest.TestCase):
         merged = merge_daily_with_meta(daily, meta)
         self.assertEqual(merged.loc[0, "Marketing_ROAS"], 4.0)
 
-    def test_daily_summary_from_orders_refunds_deduped_per_order(self) -> None:
-        df = pd.DataFrame(
-            [
-                {
-                    "Date": "2026-05-01",
-                    "Order": "#A",
-                    "Revenue": 50.0,
-                    "Product_Cost": 20.0,
-                    "Gross_Profit": 30.0,
-                    "Refunds_Total": 10.0,
-                    "Delivery_Status": "Delivered",
-                },
-                {
-                    "Date": "2026-05-01",
-                    "Order": "#A",
-                    "Revenue": 50.0,
-                    "Product_Cost": 20.0,
-                    "Gross_Profit": 30.0,
-                    "Refunds_Total": 10.0,
-                    "Delivery_Status": "Delivered",
-                },
-            ]
-        )
-        out = daily_summary_from_orders(df)
-        self.assertEqual(len(out), 1)
-        self.assertEqual(out.loc[0, "Refunds_Total"], 10.0)
-
     def test_daily_summary_from_orders_delivery_counts(self) -> None:
         df = pd.DataFrame(
             [
@@ -441,7 +275,6 @@ class TestTransform(unittest.TestCase):
         )
         out = daily_summary_from_orders(df)
         self.assertEqual(len(out), 1)
-        self.assertEqual(out.loc[0, "Refunds_Total"], 0.0)
         self.assertEqual(out.loc[0, "Orders_Total"], 2)
         self.assertEqual(out.loc[0, "Orders_Delivered"], 1)
         self.assertEqual(out.loc[0, "Orders_Undelivered"], 1)
@@ -497,6 +330,7 @@ class TestTransform(unittest.TestCase):
                     "Gross_Profit": 60.0,
                     "Ad_Spend": 25.0,
                     "Revenue_USD": 65.0,
+                    "Product_Cost_USD": 26.0,
                     "Gross_Profit_USD": 39.0,
                     "Ad_Spend_USD": 16.25,
                     "Marketing_ROAS": 4.0,
@@ -506,63 +340,9 @@ class TestTransform(unittest.TestCase):
         out = daily_summary_usd_primary(df)
         self.assertNotIn("Revenue_USD", out.columns)
         self.assertEqual(out.loc[0, "Revenue"], 65.0)
-        self.assertEqual(out.loc[0, "Product_Cost"], 40.0)
+        self.assertEqual(out.loc[0, "Product_Cost"], 26.0)
         self.assertEqual(out.loc[0, "Net_Profit"], 22.75)
         self.assertEqual(out.loc[0, "Marketing_ROAS"], round(65.0 / 16.25, 4))
-
-    def test_daily_summary_usd_primary_drops_product_cost_usd(self) -> None:
-        """Legacy Product_Cost_USD column is dropped; Product_Cost is not overwritten."""
-        df = pd.DataFrame(
-            [
-                {
-                    "Date": "2026-04-01",
-                    "Revenue": 100.0,
-                    "Product_Cost": 40.0,
-                    "Gross_Profit": 60.0,
-                    "Ad_Spend": 25.0,
-                    "Revenue_USD": 65.0,
-                    "Product_Cost_USD": 26.0,
-                    "Gross_Profit_USD": 39.0,
-                    "Ad_Spend_USD": 16.25,
-                }
-            ]
-        )
-        out = daily_summary_usd_primary(df)
-        self.assertNotIn("Product_Cost_USD", out.columns)
-        self.assertEqual(out.loc[0, "Product_Cost"], 40.0)
-
-    def test_enrich_usd_columns_refunds(self) -> None:
-        df = pd.DataFrame([{"Date": "2026-04-01", "Refunds_Total": 10.0, "Revenue": 100.0}])
-        out = enrich_usd_columns(df, 0.65, include_refunds_usd=True)
-        self.assertEqual(out.loc[0, "Refunds_USD"], 6.5)
-
-    def test_enrich_usd_columns_skips_refunds_by_default(self) -> None:
-        df = pd.DataFrame([{"Refunds_Total": 10.0, "Revenue": 100.0}])
-        out = enrich_usd_columns(df, 0.65)
-        self.assertNotIn("Refunds_USD", out.columns)
-        self.assertEqual(out.loc[0, "Revenue_USD"], 65.0)
-
-    def test_daily_summary_usd_primary_replaces_refunds_with_usd(self) -> None:
-        """Refunds_Total on sheet becomes USD when Refunds_USD exists (same rate as Revenue)."""
-        df = pd.DataFrame(
-            [
-                {
-                    "Date": "2026-04-01",
-                    "Revenue": 100.0,
-                    "Refunds_Total": 10.0,
-                    "Product_Cost": 40.0,
-                    "Gross_Profit": 60.0,
-                    "Ad_Spend": 25.0,
-                    "Revenue_USD": 65.0,
-                    "Refunds_USD": 6.5,
-                    "Gross_Profit_USD": 39.0,
-                    "Ad_Spend_USD": 16.25,
-                }
-            ]
-        )
-        out = daily_summary_usd_primary(df)
-        self.assertEqual(out.loc[0, "Refunds_Total"], 6.5)
-        self.assertNotIn("Refunds_USD", out.columns)
 
     def test_bookkeeping_monthly_from_daily(self) -> None:
         daily = pd.DataFrame(

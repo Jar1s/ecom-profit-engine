@@ -47,7 +47,6 @@ def _nav(active: str | None = None) -> str:
         ("Daily", "/app/daily", "daily"),
         ("Marketing", "/app/marketing", "marketing"),
         ("Accounting", "/app/accounting", "accounting"),
-        ("Payouts", "/app/payouts", "payouts"),
         ("Costs", "/app/costs", "costs"),
         ("Jobs", "/app/jobs", "jobs"),
     ]
@@ -260,7 +259,6 @@ def page_dashboard(*, status: dict[str, Any], cards: list[dict[str, str]], runs:
           <div class="panel-head"><div><h2>Job Control</h2><p>Spúšťanie pipeline módov priamo z aplikácie.</p></div></div>
           <div class="panel-body stack">
             <div class="inline-forms">
-              <form method="post" action="/app/run/business"><button class="btn" type="submit">Run Business</button></form>
               <form method="post" action="/app/run/core"><button class="btn" type="submit">Run Core</button></form>
               <form method="post" action="/app/run/tracking"><button class="btn secondary" type="submit">Run Tracking</button></form>
               <form method="post" action="/app/run/reporting"><button class="btn secondary" type="submit">Run Reporting</button></form>
@@ -316,11 +314,6 @@ def page_accounting(table: Any) -> str:
     return _shell(title="Accounting", subtitle="Mesačný management P&L pre operating review.", body=body, active="accounting")
 
 
-def page_payouts(table: Any) -> str:
-    body = f'''<section class="panel"><div class="panel-head"><div><h2>PAYOUTS_FEES</h2><p>Shopify payout transakcie a fee náklady pre net profit.</p></div></div><div class="panel-body">{_table(table, empty='PAYOUTS_FEES zatiaľ bez dát.')}</div></section>'''
-    return _shell(title="Payouts", subtitle="Detail payout fee transakcií započítaných do after-fees profitu.", body=body, active="payouts")
-
-
 def page_costs(missing_table: Any) -> str:
     body = f'''
       <div class="grid two">
@@ -350,7 +343,6 @@ def page_jobs(runs: list[dict[str, str]]) -> str:
     <div class="grid two">
       <section class="panel"><div class="panel-head"><div><h2>Run Jobs</h2><p>Manuálne spúšťanie pipeline režimov priamo z UI.</p></div></div>
         <div class="panel-body stack">
-          <div class="list-item"><div><strong>Business</strong><small>Shopify + Meta + payouts + refunds + BOOKKEEPING</small></div><div><form method="post" action="/app/run/business"><button class="btn" type="submit">Spustiť</button></form></div></div>
           <div class="list-item"><div><strong>Core</strong><small>Shopify + supplier costs + daily Meta + hlavné taby</small></div><div><form method="post" action="/app/run/core"><button class="btn" type="submit">Spustiť</button></form></div></div>
           <div class="list-item"><div><strong>Tracking</strong><small>17TRACK + delivery refresh len pre aktívne zásielky</small></div><div><form method="post" action="/app/run/tracking"><button class="btn secondary" type="submit">Spustiť</button></form></div></div>
           <div class="list-item"><div><strong>Reporting</strong><small>META_CAMPAIGNS a BOOKKEEPING</small></div><div><form method="post" action="/app/run/reporting"><button class="btn secondary" type="submit">Spustiť</button></form></div></div>

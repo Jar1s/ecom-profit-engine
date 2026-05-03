@@ -11,7 +11,6 @@ export const DEFAULT_EXECUTIVE_THRESHOLDS: Record<string, ExecutiveThreshold> = 
   "Undelivered 30d": { mode: "lower_better", green: 60, amber: 120 },
   "Avg Transit Days": { mode: "lower_better", green: 5, amber: 8 },
   "Profit After Ads": { mode: "higher_better", green: 0, amber: -500 },
-  "Payment net 30d": { mode: "higher_better", green: 0, amber: -500 },
 };
 
 function isThreshold(v: unknown): v is ExecutiveThreshold {

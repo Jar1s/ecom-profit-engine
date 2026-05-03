@@ -12,9 +12,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from zoneinfo import ZoneInfo
-
-from shopify_client import order_report_date
 
 _US_COLS = [
     "Month",
@@ -24,19 +21,11 @@ _US_COLS = [
     "Shipping_revenue",
     "Sales_tax_collected",
     "Refunds_total",
-    "Refunds_Full_Count",
-    "Refunds_Half_Count",
-    "Refunds_Other_Count",
-    "Refunds_Full_Amount",
-    "Refunds_Half_Amount",
-    "Refunds_Other_Amount",
     "Net_sales",
     "COGS",
     "Gross_profit",
     "Marketing_advertising",
     "Operating_income",
-    "Payout_Fees_Total",
-    "Operating_Income_After_Payout_Fees",
 ]
 
 
@@ -72,33 +61,9 @@ def _refunds_total(order: dict[str, Any]) -> float:
     return round(total, 2)
 
 
-def _refund_tier_from_ratio(ratio_pct: float | None) -> str:
-    if ratio_pct is None:
-        return "None"
-    if 99.0 <= ratio_pct <= 101.0:
-        return "Full"
-    if 49.0 <= ratio_pct <= 51.0:
-        return "Half"
-    return "Other"
-
-
-def _refund_tier(ref: float, sub: float, ship: float) -> str:
-    """Full / Half / Other / None from refund amount vs subtotal+shipping (not exported as a column)."""
-    ref = _f(ref)
-    if ref <= 0:
-        return "None"
-    base = _f(sub) + _f(ship)
-    if base <= 0:
-        return "Other"
-    ratio_pct = round((ref / base) * 100.0, 2)
-    return _refund_tier_from_ratio(ratio_pct)
-
-
-def _order_us_row(
-    order: dict[str, Any], *, shop_report_timezone: ZoneInfo | None = None
-) -> dict[str, Any] | None:
+def _order_us_row(order: dict[str, Any]) -> dict[str, Any] | None:
     created = order.get("created_at") or ""
-    date_str = order_report_date(created, shop_report_timezone)
+    date_str = created[:10] if len(created) >= 10 else ""
     if not date_str:
         return None
     oid = order.get("id")
@@ -126,9 +91,6 @@ def bookkeeping_us_monthly(
     orders: list[dict[str, Any]],
     orders_df: pd.DataFrame,
     daily_final: pd.DataFrame,
-    payout_fees_monthly_df: pd.DataFrame | None = None,
-    *,
-    shop_report_timezone: ZoneInfo | None = None,
 ) -> pd.DataFrame:
     """
     One row per calendar month with US-style column names.
@@ -142,7 +104,7 @@ def bookkeeping_us_monthly(
 
     rows: list[dict[str, Any]] = []
     for o in orders:
-        r = _order_us_row(o, shop_report_timezone=shop_report_timezone)
+        r = _order_us_row(o)
         if r:
             rows.append(r)
     if not rows:
@@ -154,10 +116,6 @@ def bookkeeping_us_monthly(
     if fin.empty:
         return pd.DataFrame(columns=_US_COLS)
     fin["Month"] = fin["Date"].dt.to_period("M").astype(str)
-    fin["_refund_tier"] = [
-        _refund_tier(r["Refunds_total"], r["Product_sales_net"], r["Shipping_revenue"])
-        for _, r in fin.iterrows()
-    ]
 
     gfin = fin.groupby("Month", as_index=False).agg(
         Gross_merchandise=("Gross_merchandise", "sum"),
@@ -168,39 +126,6 @@ def bookkeeping_us_monthly(
         Refunds_total=("Refunds_total", "sum"),
         Net_sales=("Net_sales", "sum"),
     )
-    ref_b = pd.DataFrame(columns=["Month"])
-    if "_refund_tier" in fin.columns:
-        tmp = fin.copy()
-        tmp["_refund_tier"] = tmp["_refund_tier"].astype(str).fillna("None")
-        gb = tmp.groupby(["Month", "_refund_tier"], as_index=False)["Refunds_total"].agg(["count", "sum"]).reset_index()
-        if not gb.empty:
-            out_rows: list[dict[str, Any]] = []
-            for m, chunk in gb.groupby("Month"):
-                row = {
-                    "Month": m,
-                    "Refunds_Full_Count": 0,
-                    "Refunds_Half_Count": 0,
-                    "Refunds_Other_Count": 0,
-                    "Refunds_Full_Amount": 0.0,
-                    "Refunds_Half_Amount": 0.0,
-                    "Refunds_Other_Amount": 0.0,
-                }
-                for _, r in chunk.iterrows():
-                    b = str(r.get("_refund_tier") or "")
-                    cnt = int(r.get("count") or 0)
-                    amt = float(r.get("sum") or 0)
-                    if b == "Full":
-                        row["Refunds_Full_Count"] = cnt
-                        row["Refunds_Full_Amount"] = round(amt, 2)
-                    elif b == "Half":
-                        row["Refunds_Half_Count"] = cnt
-                        row["Refunds_Half_Amount"] = round(amt, 2)
-                    elif b == "Other":
-                        row["Refunds_Other_Count"] = cnt
-                        row["Refunds_Other_Amount"] = round(amt, 2)
-                out_rows.append(row)
-            ref_b = pd.DataFrame(out_rows)
-    fin = fin.drop(columns=["_refund_tier"], errors="ignore")
     for c in gfin.columns:
         if c != "Month":
             gfin[c] = pd.to_numeric(gfin[c], errors="coerce").fillna(0.0).round(2)
@@ -236,11 +161,7 @@ def bookkeeping_us_monthly(
                 pd.to_numeric(mkt_m["Marketing_advertising"], errors="coerce").fillna(0.0).round(2)
             )
 
-    out = (
-        gfin.merge(ref_b, on="Month", how="left")
-        .merge(cogs_m, on="Month", how="outer")
-        .merge(mkt_m, on="Month", how="outer")
-    )
+    out = gfin.merge(cogs_m, on="Month", how="outer").merge(mkt_m, on="Month", how="outer")
     out = out.sort_values("Month").reset_index(drop=True)
     for c in (
         "Gross_merchandise",
@@ -255,24 +176,6 @@ def bookkeeping_us_monthly(
     ):
         if c in out.columns:
             out[c] = pd.to_numeric(out[c], errors="coerce").fillna(0.0).round(2)
-    for c in (
-        "Refunds_Full_Count",
-        "Refunds_Half_Count",
-        "Refunds_Other_Count",
-    ):
-        if c in out.columns:
-            out[c] = pd.to_numeric(out[c], errors="coerce").fillna(0).astype(int)
-        else:
-            out[c] = 0
-    for c in (
-        "Refunds_Full_Amount",
-        "Refunds_Half_Amount",
-        "Refunds_Other_Amount",
-    ):
-        if c in out.columns:
-            out[c] = pd.to_numeric(out[c], errors="coerce").fillna(0.0).round(2)
-        else:
-            out[c] = 0.0
 
     # Gross profit: net sales (subtotal + shipping − refunds) − COGS
     out["Gross_profit"] = (
@@ -282,24 +185,6 @@ def bookkeeping_us_monthly(
     out["Operating_income"] = (
         pd.to_numeric(out["Gross_profit"], errors="coerce").fillna(0.0)
         - pd.to_numeric(out["Marketing_advertising"], errors="coerce").fillna(0.0)
-    ).round(2)
-    if payout_fees_monthly_df is None:
-        payout_fees_monthly_df = pd.DataFrame(columns=["Month", "Payout_Fees_Total"])
-    if (
-        not payout_fees_monthly_df.empty
-        and "Month" in payout_fees_monthly_df.columns
-        and "Payout_Fees_Total" in payout_fees_monthly_df.columns
-    ):
-        p = payout_fees_monthly_df.copy()
-        p["Month"] = p["Month"].astype(str)
-        p["Payout_Fees_Total"] = pd.to_numeric(p["Payout_Fees_Total"], errors="coerce").fillna(0.0).round(2)
-        out = out.merge(p[["Month", "Payout_Fees_Total"]], on="Month", how="left")
-    else:
-        out["Payout_Fees_Total"] = 0.0
-    out["Payout_Fees_Total"] = pd.to_numeric(out["Payout_Fees_Total"], errors="coerce").fillna(0.0).round(2)
-    out["Operating_Income_After_Payout_Fees"] = (
-        pd.to_numeric(out["Operating_income"], errors="coerce").fillna(0.0)
-        - pd.to_numeric(out["Payout_Fees_Total"], errors="coerce").fillna(0.0)
     ).round(2)
 
     out = out[_US_COLS].sort_values("Month").reset_index(drop=True)

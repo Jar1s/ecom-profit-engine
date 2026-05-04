@@ -86,19 +86,21 @@ def build_product_lineage_index(by_product: dict[str, float]) -> dict[str, float
     (`` - farba / veľkosť`` removed stepwise) so Shopify lines with another color match.
     """
     index: dict[str, float] = {}
+    warned: set[str] = set()
     for key, cost in by_product.items():
         if cost <= 0:
             continue
         for level in product_title_family_levels(key):
             if level not in index:
                 index[level] = cost
-            elif index[level] != cost:
+            elif index[level] != cost and level not in warned:
                 logger.warning(
                     "Zhoda základu názvu %r s rôznymi cenami %.4g vs %.4g — ponechávam prvú",
                     level,
                     index[level],
                     cost,
                 )
+                warned.add(level)
     return index
 
 
